@@ -1,0 +1,9 @@
+services:
+  securedocs:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./:/app
+    # DB가 없으면 최초 1회 시드한 뒤 실행 (볼륨 마운트로 빌드 시 DB가 가려지는 문제 방지)
+    command: sh -c "[ -f instance/securedocs.db ] || python -m app.seed; python run.py"

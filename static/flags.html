@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureDocs — 플래그 현황판</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>🚩 플래그 현황판</h1>
+    <div><a href="/" style="color:#fff">← 앱으로</a></div>
+  </header>
+  <main>
+    <div class="card">
+      <h2>획득한 플래그를 입력하세요</h2>
+      <p class="hint">각 취약점을 실제로 공략하면 얻는 값(코드·키·비밀 등)을 붙여넣고 확인을 누르세요.
+        정답이면 자동으로 현황판에 기록됩니다. 새로고침해도 유지됩니다(브라우저 저장).</p>
+      <input id="flag-input" placeholder="예: S-CLASS-7F3A">
+      <button onclick="submitFlag()">확인</button>
+      <button onclick="resetFlags()" style="background:#6b7078">초기화</button>
+      <p id="flag-msg" class="msg"></p>
+    </div>
+
+    <div class="card">
+      <h2>진행률</h2>
+      <div id="overall"></div>
+      <div id="board"></div>
+    </div>
+  </main>
+
+  <script>
+    const KEY = "securedocs_flags";
+    function getFound() { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; } }
+    function setFound(a) { localStorage.setItem(KEY, JSON.stringify([...new Set(a)])); }
+
+    async function submitFlag() {
+      const v = document.getElementById("flag-input").value.trim();
+      if (!v) return;
+      const r = await fetch("/api/flags/check", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: v }) });
+      const d = await r.json();
+      const msg = document.getElementById("flag-msg");
+      if (d.ok) {
+        const f = getFound(); f.push(v); setFound(f);
+        msg.style.color = "#2c7a3f"; msg.textContent = "🎉 " + d.message;
+        document.getElementById("flag-input").value = "";
+        render();
+      } else {
+        msg.style.color = "#b23a3a"; msg.textContent = d.message;
+      }
+    }
+
+    function resetFlags() { setFound([]); render(); document.getElementById("flag-msg").textContent = ""; }
+
+    async function render() {
+      const r = await fetch("/api/flags/score", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ values: getFound() }) });
+      const d = await r.json();
+      document.getElementById("overall").innerHTML =
+        `<h3 style="color:#d9741f">전체: ${d.total.got} / ${d.total.all}</h3>`;
+      let html = "";
+      for (const [m, s] of Object.entries(d.modules)) {
+        const pct = Math.round((s.got / s.total) * 100);
+        html += `<div class="item"><b>${m}</b> — ${s.got}/${s.total}
+          <div style="background:#eee;border-radius:6px;height:10px;margin-top:4px">
+            <div style="background:#d9741f;height:10px;border-radius:6px;width:${pct}%"></div>
+          </div></div>`;
+      }
+      document.getElementById("board").innerHTML = html;
+    }
+    render();
+  </script>
+</body>
+</html>

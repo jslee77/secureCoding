@@ -1,0 +1,8 @@
+instance/
+static/uploads/
+__pycache__/
+*.pyc
+
+instance/secret.key
+cj.txt
+*.pht
