@@ -3,20 +3,19 @@ SecureDocs 애플리케이션 팩토리.
 """
 import os
 import logging
-from flask import Flask, send_from_directory
+from flask import Flask, request, send_from_directory
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from werkzeug.middleware.proxy_fix import ProxyFix
 from .config import Config
 
 # 보안 응답 헤더 (심층 방어)
-#  참고: 이 앱의 프론트엔드는 다수의 인라인 onclick/style 에 의존하므로,
-#  앱을 유지하기 위해 script/style 에 'unsafe-inline' 을 허용한다.
-#  (저장형 XSS 자체는 서버측 bleach + 프론트 이스케이프로 원천 차단됨.)
-#  운영에서는 인라인 핸들러를 제거하고 nonce 기반 CSP 로 강화하는 것이 목표.
+#  프론트엔드는 인라인 스크립트·이벤트 핸들러·style 속성을 쓰지 않으므로
+#  'unsafe-inline' 없이 같은 출처의 파일만 허용한다.
 CSP = (
     "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline'; "
-    "style-src 'self' 'unsafe-inline'; "
+    "script-src 'self'; "
+    "style-src 'self'; "
     "img-src 'self' data:; "
     "connect-src 'self'; "
     "object-src 'none'; "
@@ -31,8 +30,10 @@ SECURITY_HEADERS = {
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
 }
+HSTS = "max-age=31536000; includeSubDomains"
 
-limiter = Limiter(key_func=get_remote_address, storage_uri="memory://")
+# 저장소는 app.config["RATELIMIT_STORAGE_URI"] 로 지정한다.
+limiter = Limiter(key_func=get_remote_address)
 
 
 def create_app(test_config=None):
@@ -40,6 +41,10 @@ def create_app(test_config=None):
     app.config.from_object(Config)
     if test_config:
         app.config.update(test_config)
+
+    hops = app.config["TRUST_PROXY_HOPS"]
+    if hops:
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=hops, x_proto=hops, x_host=hops)
 
     os.makedirs(os.path.dirname(app.config["DATABASE"]), exist_ok=True)
     os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
@@ -58,7 +63,7 @@ def create_app(test_config=None):
 
     limiter.init_app(app)
 
-    from .auth import bp as auth_bp, load_identity
+    from .auth import bp as auth_bp, load_identity, enforce_csrf
     from .documents import bp as documents_bp
     from .comments import bp as comments_bp
     from .files import bp as files_bp
@@ -67,8 +72,9 @@ def create_app(test_config=None):
     from .tools import bp as tools_bp
     from .flags import bp as flags_bp
 
-    # 요청마다 JWT를 읽어 신원 로드
+    # 요청마다 JWT를 읽어 신원을 로드한 뒤, 쿠키 인증 요청의 CSRF 방어 헤더를 확인한다.
     app.before_request(load_identity)
+    app.before_request(enforce_csrf)
 
     for bp in (auth_bp, documents_bp, comments_bp, files_bp, profile_bp,
                sharing_bp, tools_bp, flags_bp):
@@ -83,6 +89,8 @@ def create_app(test_config=None):
     def set_security_headers(resp):
         for key, value in SECURITY_HEADERS.items():
             resp.headers.setdefault(key, value)
+        if request.is_secure:
+            resp.headers.setdefault("Strict-Transport-Security", HSTS)
         return resp
 
     # 정적 프론트엔드

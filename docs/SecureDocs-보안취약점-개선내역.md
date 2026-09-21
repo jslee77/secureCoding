@@ -7,11 +7,11 @@
 |---|---|
 | 작성일 | 2026-09-21 |
 | 대상 | `app/` (Flask API), `static/app.js` (프론트엔드), 설정·스키마·의존성 |
-| 조치 건수 | **23건** — Critical 7 · High 11 · Medium 5 |
-| 검증 | pytest 회귀 테스트 56개 전부 통과 (`tests/`) |
+| 조치 건수 | **1차 23건** (Critical 7 · High 11 · Medium 5) + **후속 하드닝 10건** (R-01 ~ R-10) |
+| 검증 | pytest 회귀 테스트 85개 전부 통과 (`tests/`), 의존성 취약점 스캔(`pip-audit`) 0건 |
 
 > 위험도는 CVSS 정식 산정이 아니라 **영향 범위와 악용 난이도**를 기준으로 한 상대 평가입니다.
-> 코드 위치(`파일:줄`)는 개선 후 코드 기준입니다.
+> 코드 조각의 위치는 줄 번호 대신 `파일 · 함수` 형식으로 표기합니다(현재 코드 기준).
 
 ---
 
@@ -22,7 +22,8 @@
 3. [개선 원칙](#3-개선-원칙)
 4. [항목별 상세](#4-항목별-상세)
    - [A. 인젝션](#a-인젝션) · [B. 파일·경로](#b-파일경로) · [C. 인증·세션](#c-인증세션) · [D. 접근통제](#d-접근통제) · [E. 암호화·민감정보](#e-암호화민감정보) · [F. SSRF·오류 처리](#f-ssrf오류-처리) · [G. 심층 방어](#g-심층-방어)
-5. [변경 파일 요약](#5-변경-파일-요약)
+5. [후속 하드닝 (R-01 ~ R-10)](#5-후속-하드닝-r-01--r-10)
+6. [변경 파일 요약](#6-변경-파일-요약)
 
 ---
 
@@ -109,7 +110,7 @@
 - 검색 결과를 **본인 소유 또는 공개 문서로 제한**하는 권한 조건을 쿼리에 포함
 
 ```python
-# app/documents.py:34-38
+# app/documents.py · search_documents
 rows = query(
     "SELECT id, owner_id, title, body, visibility FROM documents "
     "WHERE title LIKE ? AND (owner_id = ? OR visibility = 'public') ORDER BY id",
@@ -132,7 +133,7 @@ rows = query(
 **개선** — 템플릿은 서버가 가진 **고정 문자열**만 쓰고, 사용자 입력은 **변수 값**으로만 넘깁니다. Jinja2 자동 이스케이프도 함께 적용됩니다.
 
 ```python
-# app/documents.py:89-91
+# app/documents.py · render_document
 html = render_template_string(
     "{{ header }}\n{{ body }}\n{{ footer }}",
     header=header, footer=footer, body=doc["body"])
@@ -151,12 +152,12 @@ html = render_template_string(
 **개선** — 입력 단계와 출력 단계를 **모두** 막았습니다.
 
 ```python
-# app/comments.py:37 — 서버: 태그를 전부 제거하고 텍스트만 저장
+# app/comments.py · add_comment — 서버: 태그를 전부 제거하고 텍스트만 저장
 cleaned = bleach.clean(body, tags=[], attributes={}, strip=True)
 ```
 
 ```javascript
-// static/app.js:11 — 프론트: 모든 사용자 값을 esc()로 이스케이프한 뒤 출력
+// static/app.js · esc — 프론트: 모든 사용자 값을 esc()로 이스케이프한 뒤 출력
 function esc(s) { ... }
 ```
 
@@ -176,14 +177,17 @@ function esc(s) { ... }
 - 내부 명령·에러 원문은 응답에 싣지 않음
 
 ```python
-# app/tools.py:34-42
+# app/tools.py · export_document
 out_name = safe_filename(data.get("filename", f"doc_{doc_id}.pdf"))
 if not out_name.lower().endswith(".pdf"):
     out_name += ".pdf"
 ...
-result = subprocess.run(
-    [converter, "--convert-to", "pdf", "--outdir", "/tmp", src_path],
-    shell=False, capture_output=True, text=True)
+with tempfile.TemporaryDirectory() as workdir:       # 요청마다 격리된 작업 디렉터리
+    ...
+    result = subprocess.run(
+        [converter, "--headless", "--convert-to", "pdf", "--outdir", workdir, src_path],
+        shell=False, capture_output=True, text=True,
+        timeout=current_app.config["CONVERTER_TIMEOUT_SEC"])
 ```
 
 ---
@@ -199,7 +203,7 @@ result = subprocess.run(
 **개선** — 코드 실행 능력이 없는 **JSON 객체만** 받고, 필드도 필요한 것만 꺼내 검증합니다.
 
 ```python
-# app/tools.py:58-65
+# app/tools.py · import_backup
 backup = data.get("backup")
 if not isinstance(backup, dict):
     return jsonify(error="백업 형식이 올바르지 않습니다(JSON 객체 필요)."), 400
@@ -228,7 +232,7 @@ if visibility not in VALID_VISIBILITY:
 3. `realpath` + `commonpath`로 업로드 폴더 밖을 가리키면 거부 (심층 방어)
 
 ```python
-# app/files.py:15-21
+# app/files.py · _sealed_path
 def _sealed_path(name):
     base = os.path.realpath(current_app.config["UPLOAD_FOLDER"])
     target = os.path.realpath(os.path.join(base, name))
@@ -238,7 +242,7 @@ def _sealed_path(name):
 ```
 
 ```python
-# app/files.py:66-69
+# app/files.py · download
 att = query("SELECT document_id, filename FROM attachments WHERE stored_name = ?",
             (name,), one=True)
 if att is None or not can_access(att["document_id"], ident["sub"]):
@@ -258,12 +262,12 @@ if att is None or not can_access(att["document_id"], ident["sub"]):
 | 영향 | 실행형·HTML 파일 업로드, 파일명 추측·덮어쓰기, 파일명에 경로 요소를 넣는 공격 |
 
 **개선**
-- 확장자 **허용목록** `{.png, .jpg, .jpeg, .gif, .pdf, .txt}` (`app/config.py:104`)
+- 확장자 **허용목록** `{.png, .jpg, .jpeg, .gif, .pdf, .txt}` (`app/config.py` · `ALLOWED_UPLOAD_EXTENSIONS`)
 - 저장명은 **128비트 무작위 값 + 검증된 확장자**, 원본명은 `secure_filename` 처리 후 DB에만 기록
 - 업로드는 문서 **편집 권한**이 있을 때만 허용
 
 ```python
-# app/files.py:39-44
+# app/files.py · upload
 if not is_allowed_file(f.filename):
     return jsonify(error="허용되지 않는 파일 형식입니다."), 400
 _, ext = os.path.splitext(safe_filename(f.filename).lower())
@@ -287,12 +291,13 @@ stored = f"{secrets.token_hex(16)}{ext}"
 **개선** — 알고리즘은 **서버 설정이 결정**합니다. 토큰이 무엇을 주장하든 `HS256`이 아니면 거부됩니다.
 
 ```python
-# app/config.py:72
+# app/config.py · Config
 JWT_ALGORITHMS = ["HS256"]
 
-# app/utils.py:73-77
+# app/utils.py · decode_jwt
 return jwt.decode(token, current_app.config["JWT_SECRET"],
-                  algorithms=current_app.config["JWT_ALGORITHMS"])
+                  algorithms=current_app.config["JWT_ALGORITHMS"],
+                  options={"require": ["exp", "jti", "sub"]})
 ```
 
 ---
@@ -310,7 +315,7 @@ return jwt.decode(token, current_app.config["JWT_SECRET"],
 2. 없으면 최초 기동 시 `secrets.token_hex(32)`(256비트)와 Fernet 키를 생성해 `instance/secret.key`에 저장(권한 `0600`, `.gitignore` 처리)
 
 ```python
-# app/config.py:42-50
+# app/config.py · _load_or_create_secrets
 for name in keys:
     if keys[name]:            # 1) 환경변수 우선
         continue
@@ -333,7 +338,7 @@ for name in keys:
 **개선** — 토큰은 "누구인지"만 알려주고, **권한은 매 요청 DB의 현재 값**으로 판단합니다.
 
 ```python
-# app/sharing.py:52-55
+# app/sharing.py · require_admin
 def require_admin():
     """관리자 여부 확인 — 토큰 클레임이 아니라 DB의 현재 role 로 재확인."""
     u = current_user()
@@ -355,10 +360,10 @@ def require_admin():
 - 아이디가 없어도 **더미 해시를 검증**해 응답 시간을 맞춤
 - 인증 엔드포인트에 **분당 30회 레이트리밋** (V-23)
 
-> **남은 과제(R-02):** 회원가입은 중복 아이디에 `409`를 반환해 아이디 존재 여부를 여전히 확인할 수 있습니다(레이트리밋으로 완화).
+> **후속 조치(R-02):** 회원가입 경로의 아이디 존재 노출은 5장에서 다룹니다.
 
 ```python
-# app/auth.py:89-95
+# app/auth.py · login
 user = query("SELECT * FROM users WHERE username = ?", (username,), one=True)
 if user is None:
     verify_password(password, _DUMMY_HASH)          # 타이밍 균일화
@@ -383,7 +388,7 @@ if not verify_password(password, user["password_hash"]):
 - 해시 비교는 `hmac.compare_digest`로 상수 시간 비교
 
 ```python
-# app/auth.py:98-100
+# app/auth.py · login
 if password_needs_upgrade(user["password_hash"]):
     execute("UPDATE users SET password_hash = ? WHERE id = ?",
             (hash_password(password), user["id"]))
@@ -397,14 +402,14 @@ if password_needs_upgrade(user["password_hash"]):
 
 | | |
 |---|---|
-| 위치 | `app/auth.py` · `_auth_response` |
+| 위치 | `app/auth.py` · `session_response` |
 | 기존 문제 | `httponly=False`로 JWT 쿠키 발급 |
 | 영향 | XSS 한 번으로 `document.cookie`에서 **토큰 탈취** |
 
 **개선**
 
 ```python
-# app/auth.py:54-55
+# app/auth.py · session_response
 resp.set_cookie("token", token, httponly=True, samesite="Lax",
                 secure=request.is_secure)
 ```
@@ -427,17 +432,18 @@ resp.set_cookie("token", token, httponly=True, samesite="Lax",
 - 토큰은 응답에 싣지 않음(아웃오브밴드 채널로 전달하는 구조)
 - DB에는 **SHA-256 해시만** 저장, `expires_at`(30분)·`used` 컬럼 추가
 - 계정 유무와 관계없이 **항상 같은 응답**
-- 토큰 생성은 `secrets.token_hex`
+- 토큰 생성은 `secrets.token_hex`(256비트)
+- 토큰으로 새 비밀번호를 설정하는 `/api/profile/reset-confirm` 추가 — 1회용, 만료 확인, 성공 시 기존 세션 전부 무효화(R-04)
 
 ```python
-# app/profile.py:87-96
+# app/profile.py · reset_request
 if u:
-    token = generate_token(12)
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    token = generate_token(32)
     expires = (datetime.now(timezone.utc)
                + timedelta(minutes=RESET_TOKEN_TTL_MIN)).isoformat()
     execute("INSERT INTO reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)",
-            (u["id"], token_hash, expires))
+            (u["id"], _hash_reset_token(token), expires))
+    deliver_reset_token(u["id"], token)     # 이메일 등 아웃오브밴드 전달 지점
 return jsonify(ok=True, message="재설정 안내를 발송했습니다(등록된 경우).")
 ```
 
@@ -456,7 +462,7 @@ return jsonify(ok=True, message="재설정 안내를 발송했습니다(등록�
 **개선** — 문서 조회·렌더링·댓글·첨부 다운로드·내보내기 등 **문서를 다루는 모든 경로**에서 `can_access`(소유자 / 공개 / 공유받음)를 확인합니다. 존재 여부를 흘리지 않도록 "없음"과 "권한 없음"을 같은 404로 응답합니다.
 
 ```python
-# app/documents.py:63-66
+# app/documents.py · get_document
 doc = query("SELECT * FROM documents WHERE id = ?", (doc_id,), one=True)
 if doc is None or not can_access(doc_id, ident["sub"]):
     # 존재 여부를 흘리지 않도록 동일 응답
@@ -483,7 +489,7 @@ if doc is None or not can_access(doc_id, ident["sub"]):
 **개선** — 수정 가능한 필드를 `title`, `body`, `visibility` 세 개로 **화이트리스트**하고, `visibility`는 허용 값(`private`/`public`)만 받습니다. 수정 전 편집 권한도 확인합니다.
 
 ```python
-# app/documents.py:107-114
+# app/documents.py · update_document
 allowed = ("title", "body", "visibility")
 for col in allowed:
     if col in data:
@@ -506,12 +512,12 @@ for col in allowed:
 **개선** — 권한 함수는 오류 시 **거부(fail-closed)** 하고, 공유는 **소유자만** 할 수 있습니다.
 
 ```python
-# app/sharing.py:25-27
+# app/sharing.py · can_access
 except Exception as e:
     log.warning("권한 확인 중 오류: %s", e)
     return False   # fail-closed: 오류 시 접근 거부
 
-# app/sharing.py:64-65
+# app/sharing.py · share_document
 if not is_owner(doc_id, ident["sub"]):
     return jsonify(error="권한이 없습니다."), 403
 ```
@@ -531,7 +537,7 @@ if not is_owner(doc_id, ident["sub"]):
 **개선** — 검증된 인증 암호 **Fernet**(AES-128-CBC + HMAC-SHA256)으로 교체하고, 키는 소스 밖에서 관리합니다(V-09). 변조된 암호문은 복호화 단계에서 거부됩니다.
 
 ```python
-# app/utils.py:98-105
+# app/utils.py · encrypt_field
 def _fernet():
     return Fernet(current_app.config["DATA_KEY"].encode())
 
@@ -559,7 +565,7 @@ def encrypt_field(plain):
 - API 토큰은 **재발급 시 한 번만** 응답, 화면 표시 제거
 
 ```python
-# app/profile.py:33-36
+# app/profile.py · get_profile
 return jsonify(
     id=u["id"], username=u["username"], role=u["role"],
     full_name=u["full_name"], email=u["email"], phone=u["phone"],
@@ -579,7 +585,7 @@ return jsonify(
 **개선** — 로그에는 **이벤트와 아이디만** 남깁니다.
 
 ```python
-# app/auth.py:78, 102
+# app/auth.py · register / login
 log.info("신규 가입: username=%s", username)   # 비밀번호/토큰은 로그에 남기지 않는다.
 log.info("로그인 성공: %s", username)          # api_token 은 로그에 남기지 않는다.
 ```
@@ -597,26 +603,21 @@ log.info("로그인 성공: %s", username)          # api_token 은 로그에 �
 | 영향 | `http://127.0.0.1:5000/api/tools/internal/metadata`를 미리보기에 넣으면 서버가 스스로 호출 → **내부 API 노출**. 클라우드 메타데이터(`169.254.169.254`) 접근 가능 |
 
 **개선**
-- 스킴은 `http`/`https`만, 호스트는 **허용목록**(`app/config.py:107`)만
+- 스킴은 `http`/`https`만, 호스트는 **허용목록**(`app/config.py` · `PREVIEW_ALLOWED_HOSTS`)만
 - DNS 해석 결과가 **사설·루프백·링크로컬·예약·멀티캐스트 IP이면 거부** (IPv6 포함)
+- 검증한 IP로 **직접 연결**해 DNS 리바인딩 차단 (R-07)
 - 리다이렉트를 따라가지 않아 허용 호스트를 경유한 우회 차단, 타임아웃 5초
 - 내부 API는 출처 IP가 아니라 **관리자 인증**으로 보호
 
 ```python
-# app/tools.py:72-85
-def _is_safe_public_host(host):
-    if host not in current_app.config["PREVIEW_ALLOWED_HOSTS"]:
-        return False
-    ...
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if (ip.is_private or ip.is_loopback or ip.is_link_local
-                or ip.is_reserved or ip.is_multicast):
-            return False
-    return True
-
-# app/tools.py:102
-r = requests.get(url, timeout=5, allow_redirects=False)
+# app/tools.py · _resolve_public_ip
+if host not in current_app.config["PREVIEW_ALLOWED_HOSTS"]:
+    return None
+...
+ips = [ipaddress.ip_address(info[4][0]) for info in infos]
+if not ips or not all(_is_public_ip(ip) for ip in ips):
+    return None
+return str(ips[0])
 ```
 
 ---
@@ -632,7 +633,7 @@ r = requests.get(url, timeout=5, allow_redirects=False)
 **개선** — `DEBUG=False`로 고정하고, 상세 내용은 **서버 로그에만** 남기며 클라이언트에는 일반 메시지만 반환합니다.
 
 ```python
-# app/errors.py:11-15
+# app/errors.py · init_app
 @app.errorhandler(500)
 def internal_error(e):
     log.exception("내부 서버 오류: %s", e)
@@ -655,36 +656,166 @@ def internal_error(e):
 
 | 헤더 / 설정 | 값 | 효과 |
 |---|---|---|
-| `Content-Security-Policy` | `default-src 'self'`, `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'` | 외부 리소스·플러그인·base 태그 조작·타 사이트 폼 전송 차단 |
+| `Content-Security-Policy` | `default-src 'self'`, `script-src 'self'`, `style-src 'self'`, `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'` | 인라인·외부 스크립트, 플러그인, base 태그 조작, 타 사이트 폼 전송 차단 |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` (HTTPS 요청에만) | HTTPS 강제 |
 | `X-Frame-Options` | `DENY` | 클릭재킹 차단 |
 | `X-Content-Type-Options` | `nosniff` | MIME 스니핑 차단 |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | URL 파라미터 외부 유출 최소화 |
 | `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` | 불필요한 브라우저 기능 차단 |
-| 레이트리밋 | 인증 API 분당 30회, 채점 API 분당 60회 | 무차별 대입·열거 자동화 완화 |
+| 레이트리밋 | 인증 API 분당 30회, 가입 시간당 10회, 재설정 요청 분당 5회, 채점 API 분당 60회 | 무차별 대입·열거 자동화 완화 |
 
-> **절충:** 프론트엔드가 인라인 `onclick`/`style`에 의존해 CSP에 `'unsafe-inline'`이 남아 있습니다. XSS는 V-03의 입력 정제 + 출력 이스케이프로 막고 있으며, 인라인 핸들러를 걷어낸 뒤 nonce 기반 CSP로 강화하는 것이 후속 과제입니다.
+> 1차 조치 때는 프론트엔드가 인라인 `onclick`/`style`에 의존해 `'unsafe-inline'`을 남겼지만, 후속 하드닝(R-05)에서 걷어내 지금은 **같은 출처의 파일만** 허용합니다.
 
 ---
 
-## 5. 변경 파일 요약
+## 5. 후속 하드닝 (R-01 ~ R-10)
+
+1차 조치 후 재검증과 운영 준비 점검에서 찾은 항목입니다. 알려진 공격 경로를 다시 열지는 않았지만, 방어가 한 겹뿐이거나 운영 환경에서 문제가 될 수 있는 지점들입니다.
+
+| ID | 항목 | 위험도 | 핵심 개선 |
+|---|---|---|---|
+| R-01 | 업로드 파일이 정적 경로로 인증 없이 제공 | High | 업로드 폴더를 `instance/uploads/`로 이동 |
+| R-02 | 회원가입으로 아이디 존재 여부 확인 | Low | 아이디 형식 검증, 응답 시간 균일화, 시간당 10회 제한 |
+| R-03 | 비밀번호 변경 시 현재 비밀번호 미확인 | High | 현재 비밀번호 재확인 + 8자 이상 정책 |
+| R-04 | JWT 폐기 수단 없음 | Medium | `jti` 폐기 목록 + 사용자별 토큰 세대(`token_epoch`) |
+| R-05 | CSP `'unsafe-inline'` | Medium | 인라인 핸들러·스타일 제거, `script-src 'self'` |
+| R-06 | CSRF 방어가 `SameSite`에만 의존 | Low | 쿠키 인증 상태 변경 요청에 커스텀 헤더 요구 |
+| R-07 | SSRF 검사 후 DNS 재해석(리바인딩) | Low | 검증한 IP로 직접 연결 |
+| R-08 | 의존성의 알려진 취약점 | High | PyJWT·cryptography·bleach 최신화, CI에 `pip-audit` |
+| R-09 | Docker 이미지에 시크릿·DB 포함 | High | `.dockerignore`, 빌드 시 시드 제거 |
+| R-10 | 개발 서버·root 권한으로 실행 | Medium | gunicorn, 비루트 사용자, 프록시·레이트리밋 저장소 설정 |
+
+#### R-01 · 업로드 파일이 정적 경로로 인증 없이 제공 — `High`
+
+업로드 폴더가 `static/uploads/`에 있어, 다운로드 API의 접근통제(V-06)와 별개로 `/static/uploads/<저장명>`으로도 파일이 열렸습니다. 저장명을 한 번 알게 된 사람은 문서 권한이 회수된 뒤에도 계속 받을 수 있었습니다.
+→ 업로드 폴더를 정적 경로 밖(`instance/uploads/`)으로 옮겨, **다운로드 API가 유일한 경로**가 되게 했습니다.
+
+#### R-02 · 회원가입으로 아이디 존재 여부 확인 — `Low`
+
+로그인 응답은 통일했지만(V-11), 가입 요청은 중복 아이디에 `409`를 돌려줘 아이디 존재 여부를 확인할 수 있습니다. 아이디로 가입하는 구조에서는 "이미 쓰는 아이디"라는 사실 자체를 완전히 숨길 수 없으므로, **대량 확인을 어렵게 만드는 방향**으로 완화했습니다.
+- 아이디 형식 검증(영문·숫자·밑줄 3~32자)
+- 중복 여부와 관계없이 **먼저 해시**해 응답 시간으로 구분할 수 없게 함
+- 가입 요청 **IP당 시간당 10회** 제한, 오류 메시지에 아이디를 되돌려주지 않음
+
+#### R-03 · 비밀번호 변경 시 현재 비밀번호 미확인 — `High`
+
+탈취된 세션만으로 비밀번호를 바꿔 계정을 영구히 장악할 수 있었습니다.
+→ 현재 비밀번호를 재확인하고(`app/profile.py` · `change_password`), 가입·변경·재설정 모두 **8자 이상** 정책을 적용합니다. 변경에 성공하면 **다른 기기의 세션을 모두 끊고**(R-04) 현재 세션에만 새 토큰을 발급합니다.
+
+#### R-04 · JWT 폐기 수단 없음 — `Medium`
+
+로그아웃은 쿠키만 지웠기 때문에, 탈취된 토큰은 만료(60분)까지 계속 쓸 수 있었습니다. 비밀번호를 바꿔도 기존 토큰이 살아 있었습니다.
+
+| 상황 | 동작 |
+|---|---|
+| 로그아웃 · 토큰 재발급(`/api/auth/refresh`) | 해당 토큰의 `jti`를 만료 시각까지 `revoked_tokens`에 등록 |
+| 비밀번호 변경 · 재설정 | 사용자의 `token_epoch`를 올려 **이전에 발급된 모든 토큰**을 무효화 |
+| 매 요청 | 서명·만료 확인 후 폐기 목록과 `ver == token_epoch`를 추가 확인 |
+
+```python
+# app/auth.py · _is_token_active
+if query("SELECT 1 FROM revoked_tokens WHERE jti = ?", (claims.get("jti"),), one=True):
+    return False
+user = query("SELECT token_epoch FROM users WHERE id = ?", (claims.get("sub"),), one=True)
+return user is not None and user["token_epoch"] == claims.get("ver")
+```
+
+> 기존 DB는 앱 기동 시 `app/db.py` · `ensure_schema`가 필요한 컬럼·테이블을 자동으로 추가합니다. 이전 형식(`jti`·`ver` 없음)의 토큰은 거부되므로 배포 후 한 번 다시 로그인하면 됩니다.
+
+#### R-05 · CSP `'unsafe-inline'` — `Medium`
+
+프론트엔드의 인라인 `onclick`(18곳), `style` 속성, 인라인 `<script>`를 모두 제거했습니다.
+- 버튼은 `data-action` 속성을 달고, `static/app.js`의 **이벤트 위임** 한 곳에서 처리
+- 스타일은 `static/style.css`의 클래스로, 자가채점 페이지 스크립트는 `static/flags.js`로 분리
+- CSP를 `script-src 'self'; style-src 'self'`로 강화 — XSS가 새로 생겨도 **주입된 스크립트는 실행되지 않음**
+
+#### R-06 · CSRF 방어가 `SameSite`에만 의존 — `Low`
+
+`SameSite=Lax`는 오래된 브라우저나 같은 사이트의 다른 서브도메인에서 온 요청은 막지 못합니다.
+→ **쿠키로 인증된 상태 변경 요청**(POST·PUT·DELETE)에는 `X-Requested-With: SecureDocs` 헤더를 요구합니다. 다른 출처의 폼은 커스텀 헤더를 붙일 수 없고, 교차 출처 `fetch`는 CORS 사전 요청에서 막힙니다. `Authorization` 헤더로 인증하는 API 클라이언트는 CSRF 대상이 아니므로 예외입니다.
+
+```python
+# app/auth.py · enforce_csrf
+if request.method in _SAFE_METHODS or getattr(g, "auth_via", None) != "cookie":
+    return None
+if request.headers.get(CSRF_HEADER) != CSRF_HEADER_VALUE:
+    return jsonify(error="요청 출처를 확인할 수 없습니다."), 403
+```
+
+#### R-07 · SSRF 검사 후 DNS 재해석(리바인딩) — `Low`
+
+검사할 때 해석한 IP와 실제로 요청할 때 해석한 IP가 다를 수 있었습니다(첫 조회는 공인 IP, 두 번째는 `127.0.0.1`을 돌려주는 DNS).
+→ DNS는 **한 번만** 조회하고 검증한 IP로 직접 연결합니다. Host 헤더·TLS SNI·인증서 검증에는 원래 호스트명을 씁니다. 포트는 80/443만, URL의 사용자 정보(`user:pass@`)는 거부합니다.
+
+```python
+# app/tools.py · _fetch_pinned
+pool = urllib3.HTTPSConnectionPool(
+    ip, port, server_hostname=host, assert_hostname=host,
+    cert_reqs="CERT_REQUIRED", ca_certs=certifi.where(), **options)
+...
+resp = pool.urlopen("GET", path, headers={"Host": host_header},
+                    redirect=False, preload_content=False)
+```
+
+#### R-08 · 의존성의 알려진 취약점 — `High`
+
+`pip-audit` 점검 결과, 고정된 버전에 알려진 취약점이 있었습니다. 인증 토큰 검증(PyJWT)과 암호화(cryptography), XSS 정제(bleach)를 맡은 라이브러리라 영향 범위가 큽니다.
+
+| 패키지 | 이전 | 이후 |
+|---|---|---|
+| PyJWT | 2.7.0 | 2.14.0 |
+| cryptography | 43.0.1 | 50.0.1 |
+| bleach | 6.1.0 | 6.4.0 |
+| argon2-cffi | 23.1.0 | 25.1.0 |
+
+- 쓰지 않는 `PyYAML`(취약한 역직렬화 경로의 흔적)과 `requests`를 제거
+- PyJWT 2.10부터 `sub` 클레임은 문자열이어야 하므로 발급 시 문자열로 넣고, 검증 후 한 곳(`load_identity`)에서 정수로 변환
+- **CI**(`.github/workflows/ci.yml`)가 push·PR마다 회귀 테스트와 `pip-audit`를 실행
+
+#### R-09 · Docker 이미지에 시크릿·DB 포함 — `High`
+
+`Dockerfile`이 빌드 중에 시드를 실행했고, `.dockerignore`가 없어 `COPY . .`이 로컬 `instance/`까지 복사했습니다. 그 결과 **JWT 서명 키·암호화 키가 담긴 `secret.key`와 DB가 이미지 레이어에 남았습니다.** 이미지를 받은 누구나 토큰을 위조하고 주민번호를 복호화할 수 있는 상태였습니다.
+- `.dockerignore`로 `instance/`·`.git/`·테스트 등을 빌드 컨텍스트에서 제외
+- 빌드 시 시드를 제거 — 시크릿은 **컨테이너 첫 기동 시** 볼륨 안에서 생성
+- 데모 데이터는 `SEED_DEMO_DATA=1`일 때만 넣음(로컬용 `docker-compose.yml`에서만 설정)
+
+> 이 수정 이전에 빌드한 이미지를 공유한 적이 있다면, 그 이미지를 폐기하고 해당 시크릿으로 발급된 키를 교체해야 합니다.
+
+#### R-10 · 개발 서버·root 권한으로 실행 — `Medium`
+
+| 항목 | 이전 | 이후 |
+|---|---|---|
+| 웹 서버 | Flask 개발 서버 | gunicorn(`--preload`, 워커 2개) |
+| 실행 사용자 | root | 비루트 `securedocs`(UID 10001), 쓰기 권한은 `instance/`만 |
+| 소스 | 호스트 디렉터리를 볼륨 마운트 | 이미지에 고정, 데이터만 이름 있는 볼륨 |
+| HTTPS | — | HTTPS 요청에 HSTS, `TRUST_PROXY_HOPS`로 프록시 뒤 `Secure` 쿠키·클라이언트 IP 보정 |
+| 레이트리밋 저장소 | 메모리 고정 | `RATELIMIT_STORAGE_URI`로 Redis 등 공유 저장소 지정 가능 |
+| PDF 내보내기 | 원본 파일을 만들지 않아 항상 실패 | 요청별 임시 디렉터리에서 변환해 PDF 반환, 변환기 없으면 `503`, 시간 초과 `504` |
+
+---
+
+## 6. 변경 파일 요약
 
 | 파일 | 관련 항목 | 핵심 변경 |
 |---|---|---|
-| `app/config.py` | V-07 · V-08 · V-09 · V-21 · V-22 · R-01 · R-03 | 시크릿 외부화·자동 생성, `HS256` 고정, `DEBUG=False`, 업로드·SSRF 허용목록, 업로드 폴더를 `instance/uploads`로 이동, 비밀번호 최소 길이 |
-| `app/utils.py` | V-07 · V-08 · V-12 · V-14 · V-18 · R-03 | argon2id(+자동 재해시), 비밀번호 정책 검사, JWT 알고리즘 강제, Fernet, `secrets` 난수, 상수 시간 비교, `secure_filename` |
-| `app/db.py` | V-01 | 문자열 조립 실행 함수 `query_raw` 제거 |
+| `app/config.py` | V-07 · V-08 · V-09 · V-21 · V-22 · R-01 · R-03 · R-10 | 시크릿 외부화·자동 생성, `HS256` 고정, `DEBUG=False`, 업로드·SSRF 허용목록, 업로드 폴더 이동, 비밀번호 최소 길이, 프록시·레이트리밋·변환기 설정 |
+| `app/__init__.py` | V-23 · R-05 · R-06 · R-10 | 엄격한 CSP·보안 헤더·HSTS, 레이트리밋, CSRF 훅, ProxyFix |
+| `app/utils.py` | V-07 · V-08 · V-12 · V-14 · V-18 · R-03 · R-04 | argon2id(+자동 재해시), 비밀번호 정책, JWT 알고리즘·필수 클레임 강제, `jti`·`ver` 발급, Fernet, `secrets` 난수 |
+| `app/db.py` | V-01 · R-04 | `query_raw` 제거, 스키마 생성·자동 마이그레이션(`ensure_schema`) |
+| `app/schema.sql` | V-14 · R-04 | 멱등 스키마, `reset_tokens` 만료·사용 여부, `users.token_epoch`, `revoked_tokens` |
+| `app/auth.py` | V-11 · V-12 · V-13 · V-20 · R-02 · R-04 · R-06 | 계정 열거 방지, 해시 업그레이드, 쿠키 하드닝, 로깅 제거, 가입 검증·제한, 토큰 폐기·재발급, CSRF 검사 |
+| `app/profile.py` | V-14 · V-19 · R-03 · R-04 | 응답 DTO + 마스킹, 재설정 토큰 해시·만료·미노출, 재설정 확인 API, 현재 비밀번호 재확인, 세션 일괄 무효화 |
 | `app/documents.py` | V-01 · V-02 · V-15 · V-16 | 파라미터 바인딩 + 권한 필터, 템플릿 값 주입, 객체 단위 인가, 필드 화이트리스트 |
 | `app/comments.py` | V-03 · V-15 | `bleach` 정제, 접근통제 |
 | `app/files.py` | V-06 · V-07 · V-15 | 첨부 DB 조회 + 경로 봉인 + 접근통제, 허용목록 + 무작위 저장명 |
-| `app/tools.py` | V-04 · V-05 · V-21 | 셸 미사용(변환기 부재 시 503), JSON 전용 가져오기, SSRF 방어, 내부 API 관리자 인증 |
-| `app/auth.py` | V-11 · V-12 · V-13 · V-20 · R-03 | 계정 열거 방지, 해시 업그레이드, 쿠키 하드닝, 민감값 로깅 제거, 가입 시 비밀번호 정책 |
+| `app/tools.py` | V-04 · V-05 · V-21 · R-07 · R-10 | 셸 미사용·격리된 변환, JSON 전용 가져오기, SSRF 허용목록 + IP 고정 연결, 내부 API 관리자 인증 |
 | `app/sharing.py` | V-10 · V-15 · V-17 | `require_admin` DB 재확인, `can_access`/`can_edit` fail-closed, 소유자만 공유 |
-| `app/profile.py` | V-14 · V-19 · R-03 | 응답 DTO + 주민번호 마스킹, 재설정 토큰 해시·만료·미노출, 비밀번호 변경 시 현재 비밀번호 재확인 |
 | `app/errors.py` | V-22 | 트레이스백 노출 제거 |
-| `app/__init__.py` | V-23 | 보안 헤더·CSP, 레이트리밋 |
-| `app/schema.sql` | V-14 | `reset_tokens`에 `expires_at` · `used` 추가 |
-| `static/app.js` | V-03 · V-19 | 사용자 값 `esc()` 이스케이프, API 토큰 표시 제거 |
+| `app/seed.py` | R-04 · R-09 | 테이블 초기화 후 `ensure_schema`, 테스트용 앱 주입 |
+| `static/app.js` · `static/flags.js` | V-03 · V-19 · R-05 · R-06 | 출력 이스케이프, 토큰 표시 제거, 이벤트 위임, CSRF 헤더 |
+| `static/index.html` · `static/flags.html` · `static/style.css` | R-05 | 인라인 핸들러·스크립트·스타일 제거, 유틸리티 클래스 |
+| `Dockerfile` · `.dockerignore` · `docker-compose.yml` | R-09 · R-10 | 시크릿 미포함 이미지, 비루트 gunicorn, 데이터 볼륨, 데모 데이터 옵트인 |
+| `requirements.txt` | R-08 · R-10 | 취약 버전 교체, 미사용 패키지 제거, gunicorn 추가 |
+| `tests/` · `requirements-dev.txt` · `.github/workflows/ci.yml` | 전체 | pytest 회귀 테스트 85개, CI(테스트 + `pip-audit`) |
 | `run.py` | V-22 | 디버그 모드 해제 |
-| `requirements.txt` | — | `argon2-cffi`, `cryptography`, `bleach`, `Flask-Limiter` 추가 |
-| `tests/` · `requirements-dev.txt` | 전체 | 취약점별 pytest 회귀 테스트 56개 |
-| `.gitignore` | V-09 | `instance/secret.key` 등 시크릿·런타임 파일 제외 |
+| `.gitignore` | V-09 | `instance/` 등 시크릿·런타임 파일 제외 |

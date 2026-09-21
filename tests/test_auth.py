@@ -5,6 +5,7 @@ import json
 import sqlite3
 
 import jwt
+import pytest
 
 
 def _b64(data):
@@ -22,15 +23,18 @@ def test_login_failure_messages_are_identical(client):
     assert r1.get_json() == r2.get_json()
 
 
+@pytest.mark.filterwarnings("ignore::jwt.warnings.InsecureKeyLengthWarning")
 def test_jwt_signed_with_guessed_secret_is_rejected(client):
-    forged = jwt.encode({"sub": 2, "username": "alice", "role": "admin"}, "s3cr3t", algorithm="HS256")
+    forged = jwt.encode({"sub": "2", "username": "alice", "role": "admin", "jti": "x",
+                         "ver": 0, "exp": 4102444800}, "s3cr3t", algorithm="HS256")
     r = client.get("/api/admin/secret", headers={"Authorization": f"Bearer {forged}"})
     assert r.status_code == 403
 
 
 def test_jwt_alg_none_is_rejected(client):
     token = (_b64(b'{"alg":"none","typ":"JWT"}') + "."
-             + _b64(json.dumps({"sub": 1, "role": "admin"}).encode()) + ".")
+             + _b64(json.dumps({"sub": "1", "role": "admin", "jti": "x", "ver": 0,
+                                "exp": 4102444800}).encode()) + ".")
     r = client.get("/api/admin/secret", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 403
 
@@ -103,9 +107,16 @@ def test_change_password_enforces_policy(client, bob):
     assert r.status_code == 400
 
 
-def test_change_password_succeeds_with_current_password(client, login, bob):
+def test_change_password_succeeds_and_revokes_other_sessions(client, login, bob):
+    other_device = login("bob", "bob123")
     r = client.post("/api/profile/password",
                     json={"current_password": "bob123", "new_password": "new-password-1"}, headers=bob)
     assert r.status_code == 200
+    client.delete_cookie("token")
+    new_session = {"Authorization": f"Bearer {r.get_json()['token']}"}
+
+    assert client.get("/api/auth/me", headers=other_device).status_code == 401
+    assert client.get("/api/auth/me", headers=bob).status_code == 401
+    assert client.get("/api/auth/me", headers=new_session).status_code == 200
     assert login("bob", "bob123") is None
     assert login("bob", "new-password-1") is not None

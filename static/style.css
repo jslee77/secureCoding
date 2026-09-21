@@ -145,3 +145,27 @@ table.tbl tr:hover td{background:#fafbfc}
 @keyframes slidein{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 
 .hidden{display:none!important}
+
+/* ---------- 유틸리티 (CSP: 인라인 style 속성 대신 사용) ---------- */
+.mt-6{margin-top:6px}
+.mt-12{margin-top:12px}
+.ml-auto{margin-left:auto}
+.row-between{align-items:center;justify-content:space-between}
+.check-label{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-2)}
+.check-label input{width:auto}
+.attach-list{margin-bottom:18px}
+.comments-title{font-size:15px;margin:0 0 10px}
+.comment-empty{color:var(--muted);font-size:13px;padding:6px 0}
+.ic-orange{background:var(--orange-l);color:var(--orange)}
+.ic-blue{background:var(--blue-l);color:var(--blue)}
+.ic-green{background:var(--green-l);color:var(--green)}
+.ic-purple{background:#efe9f7;color:#6b4fa0}
+
+/* ---------- 플래그 현황판 ---------- */
+.flags-back{color:#fff}
+.btn-muted{background:#6b7078}
+.flags-total{color:var(--orange)}
+.flags-msg.ok{color:var(--green)}
+.flags-msg.err{color:var(--red)}
+.progress{background:#eee;border-radius:6px;height:10px;margin-top:4px}
+.progress-bar{background:var(--orange);height:10px;border-radius:6px;width:0}

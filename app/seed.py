@@ -5,16 +5,18 @@
 """
 import os
 from . import create_app
-from .db import executescript, execute
+from .db import executescript, execute, ensure_schema
 from .utils import hash_password, encrypt_field, generate_token
+
+TABLES = ("users", "documents", "comments", "shares", "attachments",
+          "reset_tokens", "revoked_tokens")
 
 
 def seed(app=None):
     app = app or create_app()
     with app.app_context():
-        schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
-        with open(schema_path, encoding="utf-8") as f:
-            executescript(f.read())
+        executescript("".join(f"DROP TABLE IF EXISTS {t};" for t in TABLES))
+        ensure_schema()
 
         # (username, pw, role, name, email, phone, ssn, api_token)
         users = [

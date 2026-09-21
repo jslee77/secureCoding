@@ -1,0 +1,11 @@
+# 런타임 데이터(DB·시크릿·업로드·로그)는 이미지에 넣지 않는다.
+instance/
+static/uploads/
+.git/
+.github/
+tests/
+docs/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+cj.txt

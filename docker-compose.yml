@@ -3,7 +3,12 @@ services:
     build: .
     ports:
       - "5000:5000"
+    environment:
+      # 로컬 확인용 데모 데이터. 운영에서는 지우고 시크릿(JWT_SECRET 등)을 주입한다.
+      SEED_DEMO_DATA: "1"
     volumes:
-      - ./:/app
-    # DB가 없으면 최초 1회 시드한 뒤 실행 (볼륨 마운트로 빌드 시 DB가 가려지는 문제 방지)
-    command: sh -c "[ -f instance/securedocs.db ] || python -m app.seed; python run.py"
+      # 소스는 이미지에 고정하고, DB·업로드·시크릿만 볼륨으로 보존한다.
+      - securedocs-data:/app/instance
+
+volumes:
+  securedocs-data:

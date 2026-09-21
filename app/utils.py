@@ -58,12 +58,15 @@ def password_needs_upgrade(stored_hash):
 
 # --- JWT (auth 가 발급, 각 blueprint 가 검증) ---
 def issue_jwt(user):
+    now = datetime.now(timezone.utc)
     payload = {
-        "sub": user["id"],
+        "sub": str(user["id"]),          # RFC 7519: sub 는 문자열
         "username": user["username"],
         "role": user["role"],
-        "exp": datetime.now(timezone.utc) + timedelta(
-            minutes=current_app.config["JWT_EXP_MINUTES"]),
+        "jti": secrets.token_hex(16),     # 개별 토큰 폐기(로그아웃)용 식별자
+        "ver": user["token_epoch"],       # 사용자 단위 일괄 폐기(비밀번호 변경)용
+        "iat": now,
+        "exp": now + timedelta(minutes=current_app.config["JWT_EXP_MINUTES"]),
     }
     return jwt.encode(payload, current_app.config["JWT_SECRET"], algorithm="HS256")
 
@@ -74,6 +77,7 @@ def decode_jwt(token):
         token,
         current_app.config["JWT_SECRET"],
         algorithms=current_app.config["JWT_ALGORITHMS"],
+        options={"require": ["exp", "jti", "sub"]},
     )
 
 

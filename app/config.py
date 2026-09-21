@@ -88,8 +88,9 @@ class Config:
     # 업로드 최대 크기 (16MB)
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024
 
-    # 문서 -> PDF 변환기
-    CONVERTER_BIN = "/usr/bin/soffice"
+    # 문서 -> PDF 변환기 (LibreOffice). 없으면 내보내기는 503 을 반환한다.
+    CONVERTER_BIN = os.environ.get("CONVERTER_BIN", "/usr/bin/soffice")
+    CONVERTER_TIMEOUT_SEC = 60
 
     # 개인정보 암호화용 키 (Fernet)
     DATA_KEY = _SECRETS["DATA_KEY"]
@@ -103,5 +104,14 @@ class Config:
     # 업로드 허용 확장자 (블랙리스트 -> 허용목록)
     ALLOWED_UPLOAD_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".pdf", ".txt"}
 
-    # 미리보기(preview)에서 허용할 외부 호스트 (SSRF 방지 허용목록)
+    # 미리보기(preview)에서 허용할 외부 호스트·포트 (SSRF 방지 허용목록)
     PREVIEW_ALLOWED_HOSTS = {"example.com", "www.example.com"}
+    PREVIEW_ALLOWED_PORTS = {80, 443}
+
+    # 레이트리밋 카운터 저장소. 워커·서버가 여러 대면 공유 저장소를 쓴다
+    # (예: redis://redis:6379/0 — 이 경우 `pip install redis` 필요).
+    RATELIMIT_STORAGE_URI = os.environ.get("RATELIMIT_STORAGE_URI", "memory://")
+
+    # 앱 앞단의 리버스 프록시 수. 1 이상이면 X-Forwarded-* 를 그만큼 신뢰해
+    # 클라이언트 IP(레이트리밋)·HTTPS 여부(Secure 쿠키, HSTS)를 올바르게 판단한다.
+    TRUST_PROXY_HOPS = int(os.environ.get("TRUST_PROXY_HOPS", "0"))

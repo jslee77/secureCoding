@@ -1,8 +1,13 @@
 """
-인증: 회원가입 / 로그인 / 로그아웃 / JWT 발급·검증.
+인증: 회원가입 / 로그인 / 로그아웃 / JWT 발급·검증·폐기 / CSRF 방어.
 """
+import re
 import logging
+import sqlite3
+from datetime import datetime, timezone
+import jwt
 from flask import Blueprint, request, jsonify, g, make_response
+from . import limiter
 from .db import query, execute
 from .utils import (hash_password, verify_password, password_needs_upgrade,
                     password_policy_error, issue_jwt, decode_jwt, generate_token)
@@ -16,23 +21,65 @@ _DUMMY_HASH = hash_password("timing-equalizer")
 # 인증 실패는 원인을 구분하지 않고 동일 메시지로 응답한다.
 _AUTH_FAIL_MSG = "아이디 또는 비밀번호가 올바르지 않습니다."
 
+USERNAME_PATTERN = re.compile(r"[A-Za-z0-9_]{3,32}")
+
+# 쿠키로 인증된 상태 변경 요청은 이 헤더가 있어야 한다(CSRF 방어).
+# 다른 사이트의 폼·이미지 요청은 커스텀 헤더를 붙일 수 없고, 교차 출처 fetch 는
+# CORS 사전 요청에서 막히므로 이 헤더가 곧 "같은 출처의 스크립트가 보냈다"는 증거가 된다.
+CSRF_HEADER = "X-Requested-With"
+CSRF_HEADER_VALUE = "SecureDocs"
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def _token_from_request():
+    """(토큰, 출처) — 출처는 'header' 또는 'cookie'."""
+    header = request.headers.get("Authorization", "")
+    if header.startswith("Bearer ") and header[7:]:
+        return header[7:], "header"
+    cookie = request.cookies.get("token")
+    if cookie:
+        return cookie, "cookie"
+    return None, None
+
+
+def _is_token_active(claims):
+    """폐기 목록에 없고, 사용자의 토큰 세대(token_epoch)와 일치해야 유효하다."""
+    if query("SELECT 1 FROM revoked_tokens WHERE jti = ?", (claims.get("jti"),), one=True):
+        return False
+    user = query("SELECT token_epoch FROM users WHERE id = ?", (claims.get("sub"),), one=True)
+    return user is not None and user["token_epoch"] == claims.get("ver")
+
 
 def load_identity():
     """요청마다 JWT를 읽어 g.identity 에 넣는다."""
     g.identity = None
-    token = None
-    header = request.headers.get("Authorization", "")
-    if header.startswith("Bearer "):
-        token = header[7:]
-    if not token:
-        token = request.cookies.get("token")
+    g.auth_via = None
+    token, via = _token_from_request()
     if not token:
         return
     try:
-        g.identity = decode_jwt(token)
-    except Exception as e:
+        claims = decode_jwt(token)
+    except jwt.InvalidTokenError as e:
         log.info("토큰 검증 실패: %s", e)
-        g.identity = None
+        return
+    try:
+        claims = {**claims, "sub": int(claims["sub"])}   # 앱 내부에서는 정수 ID 로 다룬다
+    except (KeyError, TypeError, ValueError):
+        return
+    if not _is_token_active(claims):
+        log.info("폐기되었거나 무효화된 토큰: sub=%s", claims["sub"])
+        return
+    g.identity = claims
+    g.auth_via = via
+
+
+def enforce_csrf():
+    """쿠키로 인증된 상태 변경 요청에 CSRF 방어 헤더가 없으면 거부한다."""
+    if request.method in _SAFE_METHODS or getattr(g, "auth_via", None) != "cookie":
+        return None
+    if request.headers.get(CSRF_HEADER) != CSRF_HEADER_VALUE:
+        return jsonify(error="요청 출처를 확인할 수 없습니다."), 403
+    return None
 
 
 def require_login():
@@ -46,7 +93,17 @@ def current_user():
     return query("SELECT * FROM users WHERE id = ?", (ident["sub"],), one=True)
 
 
-def _auth_response(user):
+def revoke_token(claims):
+    """토큰 하나를 만료 시각까지 폐기 목록에 올리고, 만료된 항목은 정리한다."""
+    now = datetime.now(timezone.utc).isoformat()
+    expires = datetime.fromtimestamp(claims["exp"], tz=timezone.utc).isoformat()
+    execute("DELETE FROM revoked_tokens WHERE expires_at < ?", (now,))
+    execute("INSERT OR IGNORE INTO revoked_tokens (jti, expires_at) VALUES (?, ?)",
+            (claims["jti"], expires))
+
+
+def session_response(user):
+    """새 JWT 를 발급해 응답 본문과 쿠키에 싣는다."""
     token = issue_jwt(user)
     resp = make_response(jsonify(
         id=user["id"], username=user["username"], role=user["role"], token=token))
@@ -57,27 +114,31 @@ def _auth_response(user):
 
 
 @bp.post("/register")
+@limiter.limit("10 per hour")   # 아이디 존재 여부를 대량으로 확인하지 못하게 제한
 def register():
     data = request.get_json(force=True)
     username = data.get("username", "")
     password = data.get("password", "")
     full_name = data.get("full_name", "")
-    if not username or not password:
-        return jsonify(error="아이디와 비밀번호는 필수입니다."), 400
+    if not USERNAME_PATTERN.fullmatch(username):
+        return jsonify(error="아이디는 영문·숫자·밑줄 3~32자여야 합니다."), 400
     policy_error = password_policy_error(password)
     if policy_error:
         return jsonify(error=policy_error), 400
-    if query("SELECT id FROM users WHERE username = ?", (username,), one=True):
-        return jsonify(error="이미 존재하는 아이디입니다."), 409
 
-    uid = execute(
-        "INSERT INTO users (username, password_hash, role, full_name, api_token) "
-        "VALUES (?, ?, 'user', ?, ?)",
-        (username, hash_password(password), full_name, generate_token()),
-    )
+    # 중복 여부와 관계없이 먼저 해시해, 응답 시간으로 아이디 존재를 알 수 없게 한다.
+    password_hash = hash_password(password)
+    try:
+        uid = execute(
+            "INSERT INTO users (username, password_hash, role, full_name, api_token) "
+            "VALUES (?, ?, 'user', ?, ?)",
+            (username, password_hash, full_name, generate_token()),
+        )
+    except sqlite3.IntegrityError:
+        return jsonify(error="사용할 수 없는 아이디입니다."), 409
     log.info("신규 가입: username=%s", username)   # 비밀번호/토큰은 로그에 남기지 않는다.
     user = query("SELECT * FROM users WHERE id = ?", (uid,), one=True)
-    return _auth_response(user)
+    return session_response(user)
 
 
 @bp.post("/login")
@@ -100,11 +161,15 @@ def login():
                 (hash_password(password), user["id"]))
 
     log.info("로그인 성공: %s", username)   # api_token 은 로그에 남기지 않는다.
-    return _auth_response(user)
+    return session_response(user)
 
 
 @bp.post("/logout")
 def logout():
+    """현재 토큰을 서버에서 폐기한다(쿠키 삭제만으로는 탈취된 토큰이 계속 유효하므로)."""
+    ident = require_login()
+    if ident:
+        revoke_token(ident)
     resp = make_response(jsonify(ok=True))
     resp.delete_cookie("token")
     return resp
@@ -121,9 +186,10 @@ def me():
 
 @bp.post("/refresh")
 def refresh():
-    """리프레시 토큰으로 재발급 (데모)."""
+    """유효한 토큰을 새 토큰으로 교체한다. 이전 토큰은 즉시 폐기된다."""
+    ident = require_login()
     u = current_user()
-    if not u:
+    if not ident or not u:
         return jsonify(error="로그인이 필요합니다."), 401
-    rt = generate_token(12)
-    return jsonify(refresh_token=rt)
+    revoke_token(ident)
+    return session_response(u)
