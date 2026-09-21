@@ -5,7 +5,7 @@ import logging
 from flask import Blueprint, request, jsonify, g, make_response
 from .db import query, execute
 from .utils import (hash_password, verify_password, password_needs_upgrade,
-                    issue_jwt, decode_jwt, generate_token)
+                    password_policy_error, issue_jwt, decode_jwt, generate_token)
 
 bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 log = logging.getLogger("securedocs")
@@ -64,6 +64,9 @@ def register():
     full_name = data.get("full_name", "")
     if not username or not password:
         return jsonify(error="아이디와 비밀번호는 필수입니다."), 400
+    policy_error = password_policy_error(password)
+    if policy_error:
+        return jsonify(error=policy_error), 400
     if query("SELECT id FROM users WHERE username = ?", (username,), one=True):
         return jsonify(error="이미 존재하는 아이디입니다."), 409
 

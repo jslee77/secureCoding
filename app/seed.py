@@ -9,8 +9,8 @@ from .db import executescript, execute
 from .utils import hash_password, encrypt_field, generate_token
 
 
-def seed():
-    app = create_app()
+def seed(app=None):
+    app = app or create_app()
     with app.app_context():
         schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
         with open(schema_path, encoding="utf-8") as f:

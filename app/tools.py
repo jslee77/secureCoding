@@ -3,6 +3,7 @@
 """
 import os
 import socket
+import logging
 import ipaddress
 import subprocess
 from urllib.parse import urlparse
@@ -14,6 +15,7 @@ from .sharing import require_admin, can_access
 from .utils import safe_filename
 
 bp = Blueprint("tools", __name__, url_prefix="/api/tools")
+log = logging.getLogger("securedocs")
 
 VALID_VISIBILITY = ("private", "public")
 
@@ -34,9 +36,13 @@ def export_document(doc_id):
         out_name += ".pdf"
     src_path = os.path.join("/tmp", out_name)
     converter = current_app.config["CONVERTER_BIN"]
-    result = subprocess.run(
-        [converter, "--convert-to", "pdf", "--outdir", "/tmp", src_path],
-        shell=False, capture_output=True, text=True)
+    try:
+        result = subprocess.run(
+            [converter, "--convert-to", "pdf", "--outdir", "/tmp", src_path],
+            shell=False, capture_output=True, text=True)
+    except FileNotFoundError:
+        log.warning("PDF 변환기를 찾을 수 없습니다: %s", converter)
+        return jsonify(error="PDF 변환 기능을 사용할 수 없습니다."), 503
     # 내부 명령/에러 원문은 노출하지 않는다.
     return jsonify(ok=(result.returncode == 0), filename=out_name)
 

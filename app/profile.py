@@ -6,7 +6,8 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, request, jsonify
 from .db import query, execute
 from .auth import require_login, current_user
-from .utils import hash_password, encrypt_field, decrypt_field, generate_token
+from .utils import (hash_password, verify_password, password_policy_error,
+                    encrypt_field, decrypt_field, generate_token)
 
 bp = Blueprint("profile", __name__, url_prefix="/api/profile")
 
@@ -54,9 +55,13 @@ def change_password():
     if not u:
         return jsonify(error="로그인이 필요합니다."), 401
     data = request.get_json(force=True)
+    # 탈취된 세션만으로 비밀번호를 바꿔 계정을 장악하지 못하도록 현재 비밀번호를 재확인한다.
+    if not verify_password(data.get("current_password", ""), u["password_hash"]):
+        return jsonify(error="현재 비밀번호가 올바르지 않습니다."), 403
     new_password = data.get("new_password", "")
-    if not new_password:
-        return jsonify(error="새 비밀번호가 필요합니다."), 400
+    policy_error = password_policy_error(new_password)
+    if policy_error:
+        return jsonify(error=policy_error), 400
     execute("UPDATE users SET password_hash = ? WHERE id = ?",
             (hash_password(new_password), u["id"]))
     return jsonify(ok=True)

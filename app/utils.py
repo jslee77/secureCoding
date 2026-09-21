@@ -38,6 +38,14 @@ def verify_password(password, stored_hash):
     return hmac.compare_digest(legacy, stored_hash)
 
 
+def password_policy_error(password):
+    """비밀번호 정책 위반 사유를 반환한다. 통과하면 None."""
+    min_len = current_app.config["PASSWORD_MIN_LENGTH"]
+    if len(password or "") < min_len:
+        return f"비밀번호는 {min_len}자 이상이어야 합니다."
+    return None
+
+
 def password_needs_upgrade(stored_hash):
     """레거시 해시이거나 argon2 파라미터가 낡았으면 재해시 필요."""
     if not stored_hash or not stored_hash.startswith("$argon2"):

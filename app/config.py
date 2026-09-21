@@ -1,7 +1,7 @@
 """
 애플리케이션 설정.
 
-SecureDocs - 사내 문서·메모 공유 플랫폼
+SecureDocs - 문서·메모 공유 플랫폼
 
 시크릿(JWT/세션/데이터 암호화 키)은 소스에 하드코딩하지 않는다.
 1) 환경변수(JWT_SECRET / SECRET_KEY / DATA_KEY)가 있으면 그것을 사용하고,
@@ -78,8 +78,9 @@ class Config:
     # SQLite 데이터베이스 경로
     DATABASE = os.path.join(BASE_DIR, "instance", "securedocs.db")
 
-    # 업로드된 파일이 저장되는 위치
-    UPLOAD_FOLDER = os.path.join(BASE_DIR, "static", "uploads")
+    # 업로드된 파일이 저장되는 위치 — 정적 경로(static/) 밖에 두어
+    # 다운로드 API의 접근통제를 거치지 않고는 제공되지 않게 한다.
+    UPLOAD_FOLDER = os.path.join(BASE_DIR, "instance", "uploads")
 
     # 문서 백업(내보내기/가져오기) 위치
     BACKUP_FOLDER = os.path.join(BASE_DIR, "instance", "backups")
@@ -95,6 +96,9 @@ class Config:
 
     # 애플리케이션 로그 파일
     LOG_FILE = os.path.join(BASE_DIR, "instance", "app.log")
+
+    # 비밀번호 최소 길이 (가입·변경 시 적용)
+    PASSWORD_MIN_LENGTH = 8
 
     # 업로드 허용 확장자 (블랙리스트 -> 허용목록)
     ALLOWED_UPLOAD_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".pdf", ".txt"}

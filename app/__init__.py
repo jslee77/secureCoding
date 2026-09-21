@@ -35,9 +35,11 @@ SECURITY_HEADERS = {
 limiter = Limiter(key_func=get_remote_address, storage_uri="memory://")
 
 
-def create_app():
+def create_app(test_config=None):
     app = Flask(__name__, static_folder=None)
     app.config.from_object(Config)
+    if test_config:
+        app.config.update(test_config)
 
     os.makedirs(os.path.dirname(app.config["DATABASE"]), exist_ok=True)
     os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
