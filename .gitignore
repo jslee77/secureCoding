@@ -8,3 +8,6 @@ cj.txt
 *.pht
 
 .pytest_cache/
+
+# macOS
+.DS_Store
