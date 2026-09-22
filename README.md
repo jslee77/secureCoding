@@ -13,6 +13,7 @@ Python 회귀 테스트 **131개**, 프론트 보안 테스트 **3개**, 의존�
 | 2 | [개선 내역](docs/02-개선내역.md) | 취약점별 `기존 코드 → 위험 → 개선 코드`(V-01~V-23)와 후속 하드닝(R-01~R-10)·재점검 조치(S-01~S-11), 공격 사슬 분석 | 어떻게 고쳤는지 볼 때 |
 | 3 | [결과 보고서](docs/03-결과보고서.md) | 조치·검증 결과, 검증 한계·업그레이드·운영 과제, 운영 배포 체크리스트, 공격 재현 방법 | 고친 뒤 안전한지 확인할 때 |
 | 4 | [추가 재점검](docs/04-추가재점검.md) | 2차 심층 진단에서 찾은 결함 11건(S)과 재현 증거, 현재 조치 상태 | 진단과 수정 결과를 비교할 때 |
+| 운영 | [운영 문서](docs/운영문서.md) | 서버 기동·종료·테스트·시드 등 운영 명령(`scripts/`) 사용법·시나리오·트러블슈팅 | 서버를 운영할 때 |
 | — | [`tests/`](tests/) | 각 취약점의 공격을 재현하는 pytest 회귀 테스트 | 자동 검증 |
 
 > **운영 환경에 배포하기 전에** — 로컬 실행 설정은 공개된 비밀번호의 데모 계정을 만듭니다.
@@ -69,13 +70,21 @@ python run.py           # 개발 서버 — 운영에는 쓰지 마세요
 ### DB 초기화
 
 ```bash
-python -m app.seed                                 # 로컬
-docker compose exec securedocs python -m app.seed  # Docker
+scripts/seed.sh                                    # 스크립트 (확인 후 재시드, 권장)
+python -m app.seed                                 # 로컬 직접 실행
+docker compose exec securedocs python -m app.seed  # Docker 직접 실행
 ```
 
 앱 기동 시 필요한 컬럼·인덱스·삭제 큐를 추가하고 중복 공유는 최근 요청으로 정리합니다. **위 seed 명령은 기존 DB를 초기화하므로 업그레이드에 사용하지 마세요.** 키·DB·파일을 백업하고 [업그레이드 절차](docs/03-결과보고서.md#4-기존-데이터의-업그레이드)를 따라야 합니다.
 
 ### 테스트
+
+```bash
+scripts/test.sh              # 전체: 회귀 131 + 프론트 3 + bandit + pip-audit (Docker, 권장)
+scripts/test.sh --local      # Docker 대신 로컬 .venv 사용
+```
+
+스크립트 없이 직접 실행하려면:
 
 ```bash
 pip install -r requirements-dev.txt
@@ -242,10 +251,10 @@ curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:5000/api/auth/lo
 ## 운영 배포
 
 `Dockerfile`은 운영 형태(비루트 gunicorn, 이미지에 시크릿 미포함, 기본값은 빈 DB)로 만들어져 있습니다.
-상세 절차와 한계는 [결과 보고서](docs/03-결과보고서.md)에 있습니다. 실제 운영 배포는 별도 검증이 필요합니다.
+서버 운영 명령은 [운영 문서](docs/운영문서.md), 상세 절차와 한계는 [결과 보고서](docs/03-결과보고서.md)에 있습니다. 실제 운영 배포는 별도 검증이 필요합니다.
 
 - [ ] `SEED_DEMO_DATA`를 설정하지 않기 (데모 계정의 비밀번호는 공개돼 있음)
-- [ ] `JWT_SECRET` · `SECRET_KEY` · `DATA_KEY` 환경변수 주입
+- [ ] `scripts/gen-secrets.sh`로 `JWT_SECRET` · `SECRET_KEY` · `DATA_KEY`(Fernet) 생성·주입
 - [ ] TLS 프록시·HTTP→HTTPS·백엔드 직접 접근 차단, `TRUST_PROXY_HOPS`와 `COOKIE_SECURE=1` 설정
 - [ ] 워커·서버가 여럿이면 `RATELIMIT_STORAGE_URI`로 공유 저장소 지정
 - [ ] `ENABLE_TRAINING_ROUTES=0` 유지, 기존 데모 계정/볼륨을 운영에 재사용하지 않기
