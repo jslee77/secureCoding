@@ -7,7 +7,7 @@ import socket
 import logging
 import tempfile
 import ipaddress
-import subprocess
+import subprocess  # nosec B404
 from urllib.parse import urlparse
 import certifi
 import urllib3
@@ -53,7 +53,8 @@ def export_document(doc_id):
         with open(src_path, "w", encoding="utf-8") as f:
             f.write(f"{doc['title']}\n\n{doc['body'] or ''}")
         try:
-            result = subprocess.run(
+            # shell 미사용, argv 고정(설정값 변환기 + 서버 생성 경로) → 임의 명령 실행 불가
+            result = subprocess.run(  # nosec B603
                 [converter, "--headless", "--convert-to", "pdf", "--outdir", workdir, src_path],
                 shell=False, capture_output=True, text=True,
                 timeout=current_app.config["CONVERTER_TIMEOUT_SEC"])

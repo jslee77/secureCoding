@@ -26,6 +26,8 @@ jobs:
           node-version: "24"
       - name: Frontend security tests
         run: node --test tests/frontend.test.cjs
+      - name: Static security analysis (bandit)
+        run: bandit -r app/
       - name: Dependency vulnerability scan
         run: |
           pip install pip-audit

@@ -198,6 +198,7 @@ S-01~S-11은 현재 코드에서 조치됐으며 Python 3.12 회귀 테스트 13
 python -m pytest -q
 node --test tests/frontend.test.cjs
 python docs/security-review/probe_security.py
+bandit -r app/
 ```
 
 검증 실행기는 임시 DB·키·파일을 사용하는 pytest를 실행하며 실패하면 비정상 종료한다. 과거의 취약 응답을 기대하는 스크립트가 아니다. 수정 전 근거는 observations-before.jsonl과 dependency-audit-before.json에 보존했다.

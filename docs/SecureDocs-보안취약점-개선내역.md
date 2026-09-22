@@ -773,7 +773,7 @@ resp = pool.urlopen("GET", path, headers={"Host": host_header},
 
 - 쓰지 않는 `PyYAML`(취약한 역직렬화 경로의 흔적)과 `requests`를 제거
 - PyJWT 2.10부터 `sub` 클레임은 문자열이어야 하므로 발급 시 문자열로 넣고, 검증 후 한 곳(`load_identity`)에서 정수로 변환
-- **CI**(`.github/workflows/ci.yml`)가 push·PR마다 회귀 테스트와 `pip-audit`를 실행
+- **CI**(`.github/workflows/ci.yml`)가 push·PR마다 회귀 테스트, 정적 분석(`bandit`), `pip-audit`를 실행
 
 #### R-09 · Docker 이미지에 시크릿·DB 포함 — `High`
 
@@ -821,7 +821,7 @@ resp = pool.urlopen("GET", path, headers={"Host": host_header},
 | `static/index.html` · `static/flags.html` · `static/style.css` | R-05 | 인라인 핸들러·스크립트·스타일 제거, 유틸리티 클래스 |
 | `Dockerfile` · `.dockerignore` · `docker-compose.yml` | R-09 · R-10 | 시크릿 미포함 이미지, 비루트 gunicorn, 데이터 볼륨, 데모 데이터 옵트인 |
 | `requirements.txt` | R-08 · R-10 | 취약 버전 교체, 미사용 패키지 제거, gunicorn 추가 |
-| `tests/` · `requirements-dev.txt` · `.github/workflows/ci.yml` | 전체 | Python 131개·프론트 3개, CI(테스트 + `pip-audit`) |
+| `tests/` · `requirements-dev.txt` · `.github/workflows/ci.yml` | 전체 | Python 131개·프론트 3개, CI(테스트 + `bandit` + `pip-audit`) |
 | `run.py` | V-22 | 디버그 모드 해제 |
 | `.gitignore` | V-09 | `instance/` 등 시크릿·런타임 파일 제외 |
 
@@ -841,6 +841,7 @@ resp = pool.urlopen("GET", path, headers={"Host": host_header},
 | `app/config.py` · `app/__init__.py` | S-05 · S-07 · S-09 · S-10 | `COOKIE_SECURE`·`ENABLE_TRAINING_ROUTES`·한도 설정, 키 저장소 하드닝, 응답 `no-store`, 교육용 라우트 게이팅 |
 | `static/app.js` | S-07 · S-10 | 페이지네이션 UI, 로그아웃 시 DOM·입력 초기화, 지연 응답 폐기 |
 | `tests/test_review_fixes.py` (신규) · `tests/frontend.test.cjs` (신규) | 전체 | S 회귀 테스트(Python 46개 + 프론트 3개) |
+| `.github/workflows/ci.yml` · `requirements-dev.txt` · `docs/security-review/bandit*` | 도구 | bandit 정적 분석 추가(`# nosec`로 오탐 억제), CI 통합, 리포트 산출물 |
 
 
 ## 7. 재점검 조치 (S-01 ~ S-11)

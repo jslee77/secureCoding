@@ -13,10 +13,24 @@
 | Python 회귀 테스트 | **131 passed**, Python 3.12.14 | 기존 85개 + 재점검 46개; 임시 SQLite·파일·키 사용 |
 | 프론트 보안 테스트 | **3 passed**, Node 25.9.0 | 실제 app.js를 Node VM에서 실행; DOM·fetch 대역 사용 |
 | 의존성 감사 | **30개 패키지, 알려진 취약점 0건**, 생략 0건 | `pip-audit 2.10.1 -r requirements.txt`, 전이 의존성 포함 |
+| 정적 분석(bandit) | **1,500 LOC, High/Medium/Low 0건** | `bandit 1.9.4 -r app/`; 초기 10건은 모두 오탐/설계상 안전으로 분류 후 사유를 단 `# nosec`로 억제 |
 | JavaScript 문법 | `node --check static/app.js` 통과 | 실제 브라우저 통합 테스트와 구분 |
 | 변경 형식 | `git diff --check` 통과 | 공백·패치 형식 |
 
-[의존성 감사 원본](security-review/dependency-audit.json), [검증 기록](security-review/verification.txt), [추가 회귀 테스트](../tests/test_review_fixes.py), [프론트 테스트](../tests/frontend.test.cjs).
+[의존성 감사 원본](security-review/dependency-audit.json), [bandit 리포트(HTML)](security-review/bandit-report.html)·[JSON](security-review/bandit.json), [검증 기록](security-review/verification.txt), [추가 회귀 테스트](../tests/test_review_fixes.py), [프론트 테스트](../tests/frontend.test.cjs).
+
+### bandit 정적 분석 — 초기 10건 분류
+
+파이썬 정적 보안 분석기 bandit을 `app/` 전체에 적용했습니다. 최초 스캔의 10건(Medium 2·Low 8)은 실제 취약점이 아니라 **오탐 또는 이미 방어된 설계 결정**이었고, 각 지점에 근거를 단 `# nosec <ID>` 주석으로 억제했습니다. 이후 스캔은 0건이며, CI가 앞으로 새로 생기는 지적을 차단합니다.
+
+| 규칙 | 위치 | 판정 | 근거 |
+|---|---|---|---|
+| B608 (SQL) | `documents.py` · `update_document`/`delete_document` | 오탐 | 컬럼·테이블명은 고정 화이트리스트, 값은 파라미터 바인딩 |
+| B603 (subprocess) | `files.py` · 업로드 검증, `tools.py` · PDF 변환 | 설계상 안전 | `shell=False` + 인자 리스트, argv에 사용자 입력 없음 |
+| B404 (import subprocess) | `files.py`, `tools.py` | 정보성 | 위 두 용도로만 사용 |
+| B105 (hardcoded password) | `validation.py` · `STRING_LIMITS` | 오탐 | 길이 제한 dict의 키 이름(`password` 등)일 뿐 시크릿 아님 |
+
+> `# nosec`는 규칙 ID를 명시하므로, 같은 줄에 **다른 종류의** 새 지적이 생기면 그대로 검출됩니다.
 
 CI는 Python 3.12와 Node 24에서 테스트하고 의존성 감사를 수행하도록 설정했습니다. 위 수치는 로컬에서 실제 수행한 결과입니다. CI의 원격 실행 결과와 동일하다고 미리 가정하지 않습니다. Docker 데몬이 실행 중이지 않아 실제 Linux 이미지·gunicorn·TLS 프록시·브라우저 전체 흐름은 이번 실행에서 검증하지 못했습니다. 기존 SSRF와 PDF 내보내기 테스트는 모의 네트워크/변환기를 사용합니다. 새 업로드 검사는 실제 Pillow·pypdf 파서를 실행합니다.
 
@@ -86,8 +100,19 @@ pip install -r requirements-dev.txt
 python -m pytest -q
 node --test tests/frontend.test.cjs
 python docs/security-review/probe_security.py
+bandit -r app/                                   # 정적 보안 분석 (0건이어야 통과)
 pip install pip-audit
 pip-audit -r requirements.txt
 ```
+
+Docker로 실행 중이면 컨테이너 안에서도 동일하게 할 수 있습니다(강사 권장 절차). bandit은 개발 도구라 런타임 이미지에는 없으므로 먼저 설치합니다.
+
+```bash
+docker compose exec securedocs pip install bandit
+docker compose exec securedocs bandit -r app/
+docker compose exec securedocs bandit -r app/ -f html -o /app/bandit-report.html
+```
+
+> 생성된 HTML 리포트 예시는 [docs/security-review/bandit-report.html](security-review/bandit-report.html)에 있습니다.
 
 `probe_security.py`는 현재 `tests/test_review_fixes.py`를 실행하고 실패를 종료 코드에 반영합니다. 수정 전의 취약 동작은 `observations-before.jsonl`에만 역사적 증거로 남깁니다. CI가 통과해도 검증하지 않은 배포 조건까지 안전하다고 단정하지 않습니다.

@@ -125,7 +125,8 @@ def update_document(doc_id):
                 args.append(data[col])
         if sets:
             args.append(doc_id)
-            execute(f"UPDATE documents SET {', '.join(sets)} WHERE id = ?", args)
+            # 컬럼명은 allowed 화이트리스트에서만, 값은 파라미터 바인딩 → 인젝션 불가
+            execute(f"UPDATE documents SET {', '.join(sets)} WHERE id = ?", args)  # nosec B608
     return jsonify(ok=True)
 
 
@@ -143,8 +144,9 @@ def delete_document(doc_id):
     with transaction():
         execute("INSERT OR IGNORE INTO pending_file_deletions(stored_name) "
                 "SELECT stored_name FROM attachments WHERE document_id=?", (doc_id,))
+        # table 은 고정 튜플, 값은 파라미터 바인딩 → 인젝션 불가
         for table in ("comments", "shares", "attachments"):
-            execute(f"DELETE FROM {table} WHERE document_id=?", (doc_id,))
+            execute(f"DELETE FROM {table} WHERE document_id=?", (doc_id,))  # nosec B608
         execute("DELETE FROM documents WHERE id = ?", (doc_id,))
     cleanup_deleted_files()
     return jsonify(ok=True)

@@ -4,7 +4,7 @@
 import os
 import secrets
 import logging
-import subprocess
+import subprocess  # nosec B404
 import sys
 import tempfile
 import click
@@ -81,7 +81,8 @@ def upload(doc_id):
         candidate.write(content)
         candidate.flush()
         try:
-            result = subprocess.run(
+            # shell 미사용, argv 고정(서버 생성 임시경로 + 검증된 확장자) → 임의 명령 실행 불가
+            result = subprocess.run(  # nosec B603
                 [sys.executable, os.path.join(os.path.dirname(__file__), "file_validation.py"), candidate.name, ext],
                 timeout=5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
         except subprocess.TimeoutExpired:

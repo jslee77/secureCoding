@@ -73,9 +73,12 @@ docker compose exec securedocs python -m app.seed  # Docker
 pip install -r requirements-dev.txt
 python -m pytest -q
 node --test tests/frontend.test.cjs  # CI는 Node 24
+bandit -r app/                       # 정적 보안 분석 (지적 0건)
+pip-audit -r requirements.txt        # 의존성 취약점 감사
 ```
 
 테스트마다 임시 디렉터리에 DB를 새로 시드하므로 `instance/`의 데이터는 건드리지 않습니다.
+정적 분석 판정과 리포트는 [결과 보고서](docs/SecureDocs-보안개선-결과보고서.md#bandit-정적-분석--초기-10건-분류)를 참고하세요.
 
 ### 데모 계정
 
@@ -124,7 +127,7 @@ node --test tests/frontend.test.cjs  # CI는 Node 24
 | 파일 | 정적 경로 밖 저장, 객체 인가·경로 봉인·무작위 이름, 제한 프로세스에서 실제 형식 검사, 삭제 실패 재시도 |
 | 민감정보 | Fernet·마스킹·응답 허용목록, API no-store, 로그아웃 DOM/지연 응답 정리, 민감값 로깅 금지 |
 | 외부 요청 | 스킴·호스트·포트 허용목록, 사설·루프백 IP 차단, 검증한 IP로 직접 연결(DNS 리바인딩 차단), 리다이렉트 금지 |
-| 운영 | 비루트 컨테이너 + gunicorn, 이미지에 시크릿 미포함, HSTS, 레이트리밋, CI 의존성 스캔(`pip-audit`) |
+| 운영 | 비루트 컨테이너 + gunicorn, 이미지에 시크릿 미포함, HSTS, 레이트리밋, CI 정적 분석(`bandit`)·의존성 스캔(`pip-audit`) |
 
 본문 65,536자·문서 1,000개/소유자, 댓글 4,000자·1,000개/문서, 첨부 8MiB/파일·200개/업로더·100MiB/업로더가 기본 한도입니다. JSON/파일 요청 전체 한도는 16MiB입니다. 파일 파싱은 악성코드 검사나 CDR를 대체하지 않습니다.
 
@@ -141,7 +144,7 @@ appA/
 ├── requirements-dev.txt   # + pytest
 ├── Dockerfile             # 비루트 gunicorn 이미지
 ├── docker-compose.yml     # 로컬 실행 (데모 데이터 · 데이터 볼륨)
-├── .github/workflows/     # CI — 테스트 + pip-audit
+├── .github/workflows/     # CI — 테스트 + bandit + pip-audit
 ├── app/
 │   ├── __init__.py        # 앱 팩토리, 보안 헤더·CSP, 레이트리밋, CSRF 훅
 │   ├── config.py          # 설정, 시크릿 로드·생성

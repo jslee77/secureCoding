@@ -4,10 +4,10 @@ from flask import request, current_app
 from werkzeug.exceptions import BadRequest
 
 STRING_LIMITS = {
-    "username": 32, "password": 1024, "current_password": 1024,
-    "new_password": 1024, "full_name": 100, "email": 254, "phone": 32,
+    "username": 32, "password": 1024, "current_password": 1024,  # nosec B105
+    "new_password": 1024, "full_name": 100, "email": 254, "phone": 32,  # nosec B105
     "ssn": 14, "title": 200, "visibility": 16, "header": 2048,
-    "footer": 2048, "filename": 200, "token": 128, "role": 16, "value": 256,
+    "footer": 2048, "filename": 200, "token": 128, "role": 16, "value": 256,  # nosec B105
 }
 NULLABLE = {"full_name", "email", "phone", "ssn"}
 
