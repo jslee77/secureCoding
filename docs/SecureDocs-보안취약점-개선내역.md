@@ -799,6 +799,8 @@ resp = pool.urlopen("GET", path, headers={"Host": host_header},
 
 ## 6. 변경 파일 요약
 
+> 이 표는 V/R 조치까지의 파일별 요약입니다. 2026-09-22 재점검(S-01~S-11)에서 추가·변경된 파일은 아래 "재점검으로 추가·변경된 파일"과 [7장](#7-재점검-조치-s-01--s-11)을 함께 보세요.
+
 | 파일 | 관련 항목 | 핵심 변경 |
 |---|---|---|
 | `app/config.py` | V-07 · V-08 · V-09 · V-21 · V-22 · R-01 · R-03 · R-10 | 시크릿 외부화·자동 생성, `HS256` 고정, `DEBUG=False`, 업로드·SSRF 허용목록, 업로드 폴더 이동, 비밀번호 최소 길이, 프록시·레이트리밋·변환기 설정 |
@@ -822,6 +824,23 @@ resp = pool.urlopen("GET", path, headers={"Host": host_header},
 | `tests/` · `requirements-dev.txt` · `.github/workflows/ci.yml` | 전체 | Python 131개·프론트 3개, CI(테스트 + `pip-audit`) |
 | `run.py` | V-22 | 디버그 모드 해제 |
 | `.gitignore` | V-09 | `instance/` 등 시크릿·런타임 파일 제외 |
+
+### 재점검으로 추가·변경된 파일 (S-01 ~ S-11)
+
+| 파일 | 관련 항목 | 핵심 변경 |
+|---|---|---|
+| `app/validation.py` (신규) | S-05 · S-06 | JSON 객체·타입·길이·엄격한 boolean 검증, `text/plain` 거부, 주민번호 형식 정규화, 페이지네이션 파싱 |
+| `app/quotas.py` (신규) | S-07 | 트랜잭션 내 문서·댓글·첨부 개수·크기·저장 총량 한도 검사 |
+| `app/file_validation.py` (신규) | S-11 | 별도 제한 프로세스에서 실제 이미지/PDF/UTF-8 파싱(시간·CPU·메모리 한도) |
+| `app/profile.py` | S-01 · S-02 · S-06 · S-07 | 재설정·변경의 원자적 상태 전이, 입력 검증, 비밀번호 확인 레이트리밋 |
+| `app/documents.py` | S-03 · S-06 · S-07 · S-08 | 공개 변경 소유자 한정, 입력 검증, 목록·검색 페이지네이션, 삭제 시 자식 행·파일 정리 |
+| `app/sharing.py` | S-04 · S-06 | 공유 UPSERT·강등·회수·삭제 API, 엄격한 `can_edit` |
+| `app/files.py` | S-07 · S-08 · S-11 | 첨부 한도, 삭제 큐·재시도·CLI, 업로드 실제 형식 검증 |
+| `app/tools.py` | S-07 | 변환·미리보기 레이트리밋 |
+| `app/db.py` · `app/schema.sql` | S-02 · S-04 · S-08 | `transaction()`(BEGIN IMMEDIATE), `foreign_keys=ON`, 공유 유일 인덱스, `pending_file_deletions` |
+| `app/config.py` · `app/__init__.py` | S-05 · S-07 · S-09 · S-10 | `COOKIE_SECURE`·`ENABLE_TRAINING_ROUTES`·한도 설정, 키 저장소 하드닝, 응답 `no-store`, 교육용 라우트 게이팅 |
+| `static/app.js` | S-07 · S-10 | 페이지네이션 UI, 로그아웃 시 DOM·입력 초기화, 지연 응답 폐기 |
+| `tests/test_review_fixes.py` (신규) · `tests/frontend.test.cjs` (신규) | 전체 | S 회귀 테스트(Python 46개 + 프론트 3개) |
 
 
 ## 7. 재점검 조치 (S-01 ~ S-11)
