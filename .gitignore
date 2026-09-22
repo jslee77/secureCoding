@@ -11,3 +11,5 @@ cj.txt
 
 # macOS
 .DS_Store
+.env
+.venv/

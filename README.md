@@ -37,10 +37,18 @@ Python 회귀 테스트 **131개**, 프론트 보안 테스트 **3개**, 의존�
 
 ## 빠른 시작
 
+> 서버 기동·종료·테스트 등 핵심 운영은 `scripts/`로 정리돼 있습니다. 명령·옵션·문제 대응은 [운영 문서](docs/운영문서.md)를 참고하세요.
+>
+> ```bash
+> scripts/start.sh     # 빌드 → 기동 → 헬스체크
+> scripts/test.sh      # 회귀 테스트 + bandit + pip-audit + 프론트
+> scripts/stop.sh      # 종료 (데이터 보존)
+> ```
+
 ### Docker (권장)
 
 ```bash
-docker compose up --build
+docker compose up --build   # 또는 scripts/start.sh
 ```
 
 <http://localhost:5000> 에 접속합니다.
@@ -145,6 +153,7 @@ appA/
 ├── Dockerfile             # 비루트 gunicorn 이미지
 ├── docker-compose.yml     # 로컬 실행 (데모 데이터 · 데이터 볼륨)
 ├── .github/workflows/     # CI — 테스트 + bandit + pip-audit
+├── scripts/               # 운영 스크립트 (start/stop/test/seed/…) — docs/운영문서.md
 ├── app/
 │   ├── __init__.py        # 앱 팩토리, 보안 헤더·CSP, 레이트리밋, CSRF 훅
 │   ├── config.py          # 설정, 시크릿 로드·생성
@@ -166,7 +175,7 @@ appA/
 │   └── errors.py          # 전역 오류 처리
 ├── static/                # 프론트엔드 (HTML / JS / CSS — 인라인 코드 없음)
 ├── tests/                 # 보안 회귀 테스트 (pytest)
-├── docs/                  # 보안 개선 문서
+├── docs/                  # 보안 개선 문서 + 운영 문서
 └── instance/              # 런타임 데이터 — DB · 업로드 · 로그 · 시크릿 (Git·이미지 제외)
 ```
 
