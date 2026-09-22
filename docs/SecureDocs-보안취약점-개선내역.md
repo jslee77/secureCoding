@@ -5,13 +5,13 @@
 
 | 항목 | 내용 |
 |---|---|
-| 작성일 | 2026-09-21 |
+| 작성/갱신일 | 2026-09-21 / 2026-09-22 |
 | 대상 | `app/` (Flask API), `static/app.js` (프론트엔드), 설정·스키마·의존성 |
-| 조치 건수 | **1차 23건** (Critical 7 · High 11 · Medium 5) + **후속 하드닝 10건** (R-01 ~ R-10) |
-| 검증 | pytest 회귀 테스트 85개 전부 통과 (`tests/`), 의존성 취약점 스캔(`pip-audit`) 0건 |
+| 조치 건수 | **1차 23건** (Critical 7 · High 11 · Medium 5) + **후속 하드닝 10건** (R-01 ~ R-10) + **재점검 11항목** (S-01 ~ S-11) |
+| 검증 | Python 회귀 테스트 131개·프론트 3개 통과, 30개 의존성 감사에서 알려진 취약점 0건 |
 
 > 위험도는 CVSS 정식 산정이 아니라 **영향 범위와 악용 난이도**를 기준으로 한 상대 평가입니다.
-> 코드 조각의 위치는 줄 번호 대신 `파일 · 함수` 형식으로 표기합니다(현재 코드 기준).
+> V/R 절의 코드 조각은 **2026-09-21 조치 당시의 교육용 발췌**이며 최신 구현 전체가 아닙니다. 최신 S 조치와 해당 함수의 현재 소스를 함께 확인하세요. 현재 동작·제한·검증 범위는 [결과 보고서](SecureDocs-보안개선-결과보고서.md)가 기준입니다.
 
 ---
 
@@ -24,6 +24,7 @@
    - [A. 인젝션](#a-인젝션) · [B. 파일·경로](#b-파일경로) · [C. 인증·세션](#c-인증세션) · [D. 접근통제](#d-접근통제) · [E. 암호화·민감정보](#e-암호화민감정보) · [F. SSRF·오류 처리](#f-ssrf오류-처리) · [G. 심층 방어](#g-심층-방어)
 5. [후속 하드닝 (R-01 ~ R-10)](#5-후속-하드닝-r-01--r-10)
 6. [변경 파일 요약](#6-변경-파일-요약)
+7. [재점검 조치 (S-01 ~ S-11)](#7-재점검-조치-s-01--s-11)
 
 ---
 
@@ -727,11 +728,13 @@ return user is not None and user["token_epoch"] == claims.get("ver")
 프론트엔드의 인라인 `onclick`(18곳), `style` 속성, 인라인 `<script>`를 모두 제거했습니다.
 - 버튼은 `data-action` 속성을 달고, `static/app.js`의 **이벤트 위임** 한 곳에서 처리
 - 스타일은 `static/style.css`의 클래스로, 자가채점 페이지 스크립트는 `static/flags.js`로 분리
-- CSP를 `script-src 'self'; style-src 'self'`로 강화 — XSS가 새로 생겨도 **주입된 스크립트는 실행되지 않음**
+- CSP를 `script-src 'self'; style-src 'self'`로 강화 — XSS가 새로 생겨도 **일반적인 인라인 스크립트 주입을 차단(출력 이스케이프를 대체하지 않음)**
 
 #### R-06 · CSRF 방어가 `SameSite`에만 의존 — `Low`
 
 `SameSite=Lax`는 오래된 브라우저나 같은 사이트의 다른 서브도메인에서 온 요청은 막지 못합니다.
+> **S-05 후속 보완:** 현재는 로그인·가입도 헤더가 필수이고 JSON Content-Type, Origin/Fetch Metadata를 검사합니다. 아래 코드는 당시 구현 이력입니다.
+
 → **쿠키로 인증된 상태 변경 요청**(POST·PUT·DELETE)에는 `X-Requested-With: SecureDocs` 헤더를 요구합니다. 다른 출처의 폼은 커스텀 헤더를 붙일 수 없고, 교차 출처 `fetch`는 CORS 사전 요청에서 막힙니다. `Authorization` 헤더로 인증하는 API 클라이언트는 CSRF 대상이 아니므로 예외입니다.
 
 ```python
@@ -785,7 +788,7 @@ resp = pool.urlopen("GET", path, headers={"Host": host_header},
 
 | 항목 | 이전 | 이후 |
 |---|---|---|
-| 웹 서버 | Flask 개발 서버 | gunicorn(`--preload`, 워커 2개) |
+| 웹 서버 | Flask 개발 서버 | gunicorn(`--preload`, 현재 기본 워커 1개; S-07에서 memory 카운터에 맞춤) |
 | 실행 사용자 | root | 비루트 `securedocs`(UID 10001), 쓰기 권한은 `instance/`만 |
 | 소스 | 호스트 디렉터리를 볼륨 마운트 | 이미지에 고정, 데이터만 이름 있는 볼륨 |
 | HTTPS | — | HTTPS 요청에 HSTS, `TRUST_PROXY_HOPS`로 프록시 뒤 `Secure` 쿠키·클라이언트 IP 보정 |
@@ -816,6 +819,48 @@ resp = pool.urlopen("GET", path, headers={"Host": host_header},
 | `static/index.html` · `static/flags.html` · `static/style.css` | R-05 | 인라인 핸들러·스크립트·스타일 제거, 유틸리티 클래스 |
 | `Dockerfile` · `.dockerignore` · `docker-compose.yml` | R-09 · R-10 | 시크릿 미포함 이미지, 비루트 gunicorn, 데이터 볼륨, 데모 데이터 옵트인 |
 | `requirements.txt` | R-08 · R-10 | 취약 버전 교체, 미사용 패키지 제거, gunicorn 추가 |
-| `tests/` · `requirements-dev.txt` · `.github/workflows/ci.yml` | 전체 | pytest 회귀 테스트 85개, CI(테스트 + `pip-audit`) |
+| `tests/` · `requirements-dev.txt` · `.github/workflows/ci.yml` | 전체 | Python 131개·프론트 3개, CI(테스트 + `pip-audit`) |
 | `run.py` | V-22 | 디버그 모드 해제 |
 | `.gitignore` | V-09 | `instance/` 등 시크릿·런타임 파일 제외 |
+
+
+## 7. 재점검 조치 (S-01 ~ S-11)
+
+이 절은 2026-09-22 재점검에서 확인한 상태 전이·동시성·데이터 수명주기 결함의 현재 수정입니다. 수정 전 증거는 [재점검 기록](SecureDocs-시큐어코딩-재점검-2026-09-22.md)에 보존합니다.
+
+| ID | 이전 동작 | 현재 구현 | 주요 코드 |
+|---|---|---|---|
+| S-01 | 비밀번호 변경 후 이전 복구 토큰 생존 | 비밀번호·JWT 세대·복구 토큰을 한 트랜잭션에서 변경 | `profile._set_password`, `change_password` |
+| S-02 | 토큰 조회/소진/비밀번호 갱신 개별 커밋 | 쓰기 잠금 후 토큰 재검증·계정 전체 토큰 소진, 실패 롤백 | `db.transaction`, `profile.reset_confirm` |
+| S-03 | 공유 편집자가 문서 전체 공개 가능 | 공개 범위는 소유자만 변경 | `documents.update_document` |
+| S-04 | 공유 INSERT 누적으로 권한 강등 실패 | 최근 공유로 중복 정리·유일성 인덱스·UPSERT·소유자 회수 API | `db.ensure_schema`, `sharing` |
+| S-05 | 미인증 세션 생성 CSRF 누락, text/plain 허용 | 로그인/가입 헤더 필수, 출처 검사, JSON 미디어 타입 강제 | `auth.enforce_csrf`, `validation.json_object` |
+| S-06 | 배열/객체 입력 500, 문자열 false가 참 | 객체·문자열·길이·엄격한 boolean 검증, SSN 정규화·마스킹 | `validation`, `profile._mask_ssn` |
+| S-07 | 무제한 비밀번호 확인·데이터 축적·전체 목록 | 계정/IP 제한, 트랜잭션 내 할당량, 크기/개수/총량 제한, 페이지 API·UI | `quotas`, `config`, `auth`, `files`, `static/app.js` |
+| S-08 | 문서만 삭제하고 첨부/공유 잔류 | 자식 행·파일 삭제 큐 원자적 등록, 파일 재시도와 CLI | `documents.delete_document`, `files.cleanup_deleted_files` |
+| S-09 | 손상 키 파일을 새 키로 덮어씀 | 오류 시 시작 중단, 파일 잠금·0600·원자적 기록, 형식/길이 검증 | `config._load_or_create_secrets` |
+| S-10 | 민감 응답 캐시·로그아웃 DOM 잔류 | API no-store, DOM/입력 초기화, 이전 세션의 비동기 결과 폐기 | `set_security_headers`, `static/app.js` |
+| S-11 | 확장자만 확인 | 실제 이미지/PDF/UTF-8 파싱, 별도 프로세스의 시간/자원 한도 | `file_validation`, `files.upload` |
+
+### 원자적 상태 변경의 핵심
+
+```python
+# 실제 구현은 app/profile.py 참조. 해싱은 쓰기 잠금을 잡기 전에 수행한다.
+with transaction():  # BEGIN IMMEDIATE
+    row = query("SELECT user_id FROM reset_tokens "
+                "WHERE token=? AND used=0 AND expires_at>?", (token_hash, now), one=True)
+    if row is None:
+        return jsonify(error="유효하지 않은 토큰"), 400
+    _set_password(row["user_id"], password_hash)
+    # 비밀번호·token_epoch·해당 계정 복구 토큰이 함께 커밋되거나 함께 롤백된다.
+```
+
+순차 재사용만 검사하면 경쟁 조건을 놓친다. 추가 테스트는 같은 토큰과 서로 다른 동일 계정 토큰의 요청을 동기화해 정확히 한 건만 성공하는지 확인하고, 변경 중 예외를 주입해 롤백도 확인한다. JWT refresh의 확인·폐기·발급 역시 동일 원칙으로 처리한다.
+
+### 파일과 DB의 경계
+
+DB 삭제와 파일 삭제는 하나의 DB 트랜잭션이 될 수 없다. 문서 삭제 시 파일명을 영속 삭제 큐에 먼저 기록하고 자식 행을 제거한다. 실제 unlink에 실패하면 큐를 유지해 앱 시작/CLI에서 재시도한다. 업로드 DB 실패도 파일 정리를 수행한다. 강제 종료로 생긴 과거 고아 파일·백업 데이터의 파기는 별도 대조와 보존 정책이 필요하다.
+
+### 검증과 남은 한계
+
+[추가 Python 테스트](../tests/test_review_fixes.py) 46개와 [프론트 테스트](../tests/frontend.test.cjs) 3개를 추가했다. 이전 85개도 유지한다. 업로드 파싱은 악성코드 무해화 보장이 아니며, 실제 TLS/다중 워커/복구 발송/PDF 변환기 배포는 별도 검증 대상이다. 상세 제한값과 업그레이드 절차는 [결과 보고서](SecureDocs-보안개선-결과보고서.md)에 있다.

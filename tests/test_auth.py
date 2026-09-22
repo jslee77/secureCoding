@@ -17,8 +17,8 @@ def _db(flask_app):
 
 
 def test_login_failure_messages_are_identical(client):
-    r1 = client.post("/api/auth/login", json={"username": "no_such_user", "password": "x"})
-    r2 = client.post("/api/auth/login", json={"username": "svc_backup", "password": "wrong"})
+    r1 = client.post("/api/auth/login", headers={"X-Requested-With": "SecureDocs"}, json={"username": "no_such_user", "password": "x"})
+    r2 = client.post("/api/auth/login", headers={"X-Requested-With": "SecureDocs"}, json={"username": "svc_backup", "password": "wrong"})
     assert r1.status_code == r2.status_code == 401
     assert r1.get_json() == r2.get_json()
 
@@ -64,7 +64,7 @@ def test_legacy_sha256_hash_is_upgraded_on_login(flask_app, login):
 
 
 def test_auth_cookie_is_httponly_and_samesite(client):
-    r = client.post("/api/auth/login", json={"username": "alice", "password": "alice123"})
+    r = client.post("/api/auth/login", headers={"X-Requested-With": "SecureDocs"}, json={"username": "alice", "password": "alice123"})
     cookie = r.headers.get("Set-Cookie", "")
     assert "HttpOnly" in cookie
     assert "SameSite=Lax" in cookie
@@ -80,7 +80,7 @@ def test_reset_request_does_not_leak_token_or_account_existence(client, flask_ap
 
 
 def test_login_is_rate_limited(client):
-    codes = [client.post("/api/auth/login", json={"username": "x", "password": "y"}).status_code
+    codes = [client.post("/api/auth/login", headers={"X-Requested-With": "SecureDocs"}, json={"username": "x", "password": "y"}).status_code
              for _ in range(35)]
     assert 429 in codes
 
@@ -88,7 +88,7 @@ def test_login_is_rate_limited(client):
 # --- R-03: 비밀번호 정책 · 변경 시 현재 비밀번호 재확인 ---
 
 def test_register_rejects_short_password(client):
-    r = client.post("/api/auth/register", json={"username": "dave", "password": "short"})
+    r = client.post("/api/auth/register", headers={"X-Requested-With": "SecureDocs"}, json={"username": "dave", "password": "short"})
     assert r.status_code == 400
 
 

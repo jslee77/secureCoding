@@ -2,7 +2,7 @@ services:
   securedocs:
     build: .
     ports:
-      - "5000:5000"
+      - "127.0.0.1:5000:5000"
     environment:
       # 로컬 확인용 데모 데이터. 운영에서는 지우고 시크릿(JWT_SECRET 등)을 주입한다.
       SEED_DEMO_DATA: "1"

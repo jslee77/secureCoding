@@ -2,7 +2,8 @@
 문서 공유 + 관리자 기능.
 """
 import logging
-from flask import Blueprint, request, jsonify
+from .validation import json_object
+from flask import Blueprint, request, jsonify, current_app, abort
 from .db import query, execute
 from .auth import require_login, current_user
 
@@ -63,13 +64,39 @@ def share_document(doc_id):
     # 소유자만 공유할 수 있다.
     if not is_owner(doc_id, ident["sub"]):
         return jsonify(error="권한이 없습니다."), 403
-    data = request.get_json(force=True)
+    data = json_object()
     target = data.get("username", "")
     u = query("SELECT id FROM users WHERE username = ?", (target,), one=True)
     if not u:
         return jsonify(error="대상 사용자를 찾을 수 없습니다."), 404
-    execute("INSERT INTO shares (document_id, user_id, can_edit) VALUES (?, ?, ?)",
+    execute("INSERT INTO shares (document_id, user_id, can_edit) VALUES (?, ?, ?) "
+            "ON CONFLICT(document_id, user_id) DO UPDATE SET can_edit=excluded.can_edit",
             (doc_id, u["id"], 1 if data.get("can_edit") else 0))
+    log.info("공유 권한 변경: actor=%s document=%s target=%s edit=%s",
+             ident["sub"], doc_id, u["id"], data.get("can_edit", False))
+    return jsonify(ok=True)
+
+
+@bp.get("/documents/<int:doc_id>/shares")
+def list_shares(doc_id):
+    ident = require_login()
+    if not ident or not is_owner(doc_id, ident["sub"]):
+        return jsonify(error="권한이 없습니다."), 403
+    from .validation import pagination
+    limit, offset = pagination()
+    rows = query("SELECT s.user_id, u.username, s.can_edit FROM shares s "
+                 "JOIN users u ON u.id=s.user_id WHERE s.document_id=? "
+                 "ORDER BY s.user_id LIMIT ? OFFSET ?", (doc_id, limit, offset))
+    return jsonify([dict(r) for r in rows])
+
+
+@bp.delete("/documents/<int:doc_id>/shares/<int:user_id>")
+def revoke_share(doc_id, user_id):
+    ident = require_login()
+    if not ident or not is_owner(doc_id, ident["sub"]):
+        return jsonify(error="권한이 없습니다."), 403
+    execute("DELETE FROM shares WHERE document_id=? AND user_id=?", (doc_id, user_id))
+    log.info("공유 회수: actor=%s document=%s target=%s", ident["sub"], doc_id, user_id)
     return jsonify(ok=True)
 
 
@@ -77,7 +104,10 @@ def share_document(doc_id):
 def admin_users():
     if not require_admin():
         return jsonify(error="권한이 없습니다."), 403
-    rows = query("SELECT id, username, role, full_name, email, phone FROM users ORDER BY id")
+    from .validation import pagination
+    limit, offset = pagination()
+    rows = query("SELECT id, username, role, full_name, email, phone FROM users ORDER BY id LIMIT ? OFFSET ?",
+                 (limit, offset))
     return jsonify([dict(r) for r in rows])
 
 
@@ -85,8 +115,11 @@ def admin_users():
 def admin_documents():
     if not require_admin():
         return jsonify(error="권한이 없습니다."), 403
+    from .validation import pagination
+    limit, offset = pagination()
     rows = query("SELECT d.id, d.title, d.visibility, u.username AS owner "
-                 "FROM documents d JOIN users u ON u.id = d.owner_id ORDER BY d.id")
+                 "FROM documents d JOIN users u ON u.id = d.owner_id ORDER BY d.id LIMIT ? OFFSET ?",
+                 (limit, offset))
     return jsonify([dict(r) for r in rows])
 
 
@@ -94,7 +127,7 @@ def admin_documents():
 def set_role(user_id):
     if not require_admin():
         return jsonify(error="권한이 없습니다."), 403
-    data = request.get_json(force=True)
+    data = json_object()
     new_role = data.get("role", "user")
     if new_role not in ("user", "admin"):
         return jsonify(error="잘못된 역할입니다."), 400
@@ -105,6 +138,8 @@ def set_role(user_id):
 @bp.get("/admin/secret")
 def admin_secret():
     """관리자 전용 마스터 키."""
+    if not current_app.config["ENABLE_TRAINING_ROUTES"]:
+        abort(404)
     if not require_admin():
         return jsonify(error="권한이 없습니다."), 403
     return jsonify(master_key="MK-ADMIN-7788")

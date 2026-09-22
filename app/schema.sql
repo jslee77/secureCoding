@@ -69,3 +69,8 @@ CREATE TABLE IF NOT EXISTS revoked_tokens (
     jti        TEXT PRIMARY KEY,
     expires_at TEXT NOT NULL
 );
+
+-- 파일 삭제는 DB와 원자적으로 커밋할 수 없으므로 재시도할 작업을 먼저 보존한다.
+CREATE TABLE IF NOT EXISTS pending_file_deletions (
+    stored_name TEXT PRIMARY KEY
+);

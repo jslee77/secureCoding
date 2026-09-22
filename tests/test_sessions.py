@@ -5,7 +5,7 @@ from app import profile
 
 
 def _login_with_cookie(client, username, password):
-    r = client.post("/api/auth/login", json={"username": username, "password": password})
+    r = client.post("/api/auth/login", headers={"X-Requested-With": "SecureDocs"}, json={"username": username, "password": password})
     assert r.status_code == 200
     return {"Authorization": f"Bearer {r.get_json()['token']}"}
 
@@ -14,12 +14,12 @@ def _login_with_cookie(client, username, password):
 
 def test_register_validates_username(client):
     for bad in ["ab", "has space", "<script>", "a" * 33]:
-        r = client.post("/api/auth/register", json={"username": bad, "password": "long-enough-1"})
+        r = client.post("/api/auth/register", headers={"X-Requested-With": "SecureDocs"}, json={"username": bad, "password": "long-enough-1"})
         assert r.status_code == 400, bad
 
 
 def test_register_duplicate_uses_generic_message(client):
-    r = client.post("/api/auth/register", json={"username": "alice", "password": "long-enough-1"})
+    r = client.post("/api/auth/register", headers={"X-Requested-With": "SecureDocs"}, json={"username": "alice", "password": "long-enough-1"})
     assert r.status_code == 409
     assert "alice" not in r.get_json()["error"]
 
@@ -28,7 +28,7 @@ def test_register_is_rate_limited(client):
     codes = []
     for i in range(12):
         client.delete_cookie("token")   # 가입마다 세션 쿠키가 생기므로, 새 방문자처럼 비운다
-        codes.append(client.post("/api/auth/register",
+        codes.append(client.post("/api/auth/register", headers={"X-Requested-With": "SecureDocs"},
                                  json={"username": f"user_{i}", "password": "long-enough-1"}).status_code)
     assert codes[:10] == [200] * 10
     assert 429 in codes[10:]

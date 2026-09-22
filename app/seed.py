@@ -8,8 +8,8 @@ from . import create_app
 from .db import executescript, execute, ensure_schema
 from .utils import hash_password, encrypt_field, generate_token
 
-TABLES = ("users", "documents", "comments", "shares", "attachments",
-          "reset_tokens", "revoked_tokens")
+TABLES = ("pending_file_deletions", "comments", "shares", "attachments",
+          "reset_tokens", "revoked_tokens", "documents", "users")
 
 
 def seed(app=None):

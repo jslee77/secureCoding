@@ -25,6 +25,7 @@ def flask_app(tmp_path):
     instance = tmp_path / "instance"
     app = create_app({
         "TESTING": True,
+        "ENABLE_TRAINING_ROUTES": True,
         "DATABASE": str(instance / "securedocs.db"),
         "UPLOAD_FOLDER": str(instance / "uploads"),
         "BACKUP_FOLDER": str(instance / "backups"),
@@ -44,7 +45,7 @@ def client(flask_app):
 def login(client):
     """로그인 후 Bearer 헤더를 돌려준다. 쿠키는 지워 헤더 인증만 쓰게 한다."""
     def _login(username, password):
-        r = client.post("/api/auth/login", json={"username": username, "password": password})
+        r = client.post("/api/auth/login", headers={"X-Requested-With": "SecureDocs"}, json={"username": username, "password": password})
         client.delete_cookie("token")
         token = (r.get_json() or {}).get("token")
         return {"Authorization": f"Bearer {token}"} if token else None

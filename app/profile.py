@@ -4,9 +4,11 @@
 import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
+from .validation import json_object
 from flask import Blueprint, request, jsonify
 from . import limiter
-from .db import query, execute
+from .db import query, execute, transaction
+from .auth import account_limit_key
 from .auth import current_user, session_response
 from .utils import (hash_password, verify_password, password_policy_error,
                     encrypt_field, decrypt_field, generate_token)
@@ -30,20 +32,21 @@ def deliver_reset_token(user_id, token):
     log.info("비밀번호 재설정 토큰 발급: user_id=%s", user_id)
 
 
-def _set_password(user_id, new_password):
-    """비밀번호를 바꾸고 토큰 세대를 올려, 이전에 발급된 모든 JWT 를 무효화한다."""
+def _set_password(user_id, password_hash):
+    """호출자의 트랜잭션 안에서 모든 인증·복구 상태를 함께 변경한다."""
     execute("UPDATE users SET password_hash = ?, token_epoch = token_epoch + 1 WHERE id = ?",
-            (hash_password(new_password), user_id))
+            (password_hash, user_id))
+    execute("UPDATE reset_tokens SET used = 1 WHERE user_id = ?", (user_id,))
 
 
 def _mask_ssn(ssn):
     """주민번호를 마스킹해 표시한다(뒤 7자리 가림)."""
     if not ssn:
         return None
-    if "-" in ssn:
-        head, _, _tail = ssn.partition("-")
-        return f"{head}-*******"
-    return ssn[:6] + "*" * max(0, len(ssn) - 6)
+    import re
+    if not re.fullmatch(r"[0-9]{6}-?[0-9]{7}", ssn):
+        return "******-*******"
+    return ssn[:6] + "-*******"
 
 
 @bp.get("")
@@ -63,7 +66,7 @@ def update_profile():
     u = current_user()
     if not u:
         return jsonify(error="로그인이 필요합니다."), 401
-    data = request.get_json(force=True)
+    data = json_object()
     execute(
         "UPDATE users SET full_name = ?, email = ?, phone = ?, ssn_enc = ? WHERE id = ?",
         (data.get("full_name"), data.get("email"), data.get("phone"),
@@ -72,22 +75,30 @@ def update_profile():
 
 
 @bp.post("/password")
+@limiter.limit("5 per minute", key_func=account_limit_key)
+@limiter.limit("20 per minute")
 def change_password():
     u = current_user()
     if not u:
         return jsonify(error="로그인이 필요합니다."), 401
-    data = request.get_json(force=True)
+    data = json_object()
     # 탈취된 세션만으로 비밀번호를 바꿔 계정을 장악하지 못하도록 현재 비밀번호를 재확인한다.
     if not verify_password(data.get("current_password", ""), u["password_hash"]):
+        log.info("비밀번호 재확인 실패: user_id=%s", u["id"])
         return jsonify(error="현재 비밀번호가 올바르지 않습니다."), 403
     new_password = data.get("new_password", "")
     policy_error = password_policy_error(new_password)
     if policy_error:
         return jsonify(error=policy_error), 400
-    _set_password(u["id"], new_password)
-    # 다른 기기의 세션은 모두 끊기고, 지금 세션에는 새 토큰을 발급한다.
-    fresh = query("SELECT * FROM users WHERE id = ?", (u["id"],), one=True)
-    return session_response(fresh)
+    password_hash = hash_password(new_password)
+    with transaction():
+        fresh = query("SELECT * FROM users WHERE id = ?", (u["id"],), one=True)
+        if fresh["token_epoch"] != u["token_epoch"]:
+            return jsonify(error="인증 상태가 변경되었습니다. 다시 로그인하세요."), 409
+        _set_password(u["id"], password_hash)
+        log.info("비밀번호 변경: user_id=%s", u["id"])
+        fresh = query("SELECT * FROM users WHERE id = ?", (u["id"],), one=True)
+        return session_response(fresh)
 
 
 @bp.post("/token")
@@ -104,7 +115,7 @@ def reissue_token():
 @bp.post("/reset-request")
 @limiter.limit("5 per minute")
 def reset_request():
-    data = request.get_json(force=True)
+    data = json_object()
     username = data.get("username", "")
     u = query("SELECT id FROM users WHERE username = ?", (username,), one=True)
     # 계정 존재 여부를 흘리지 않도록 항상 동일 응답. 토큰은 응답에 넣지 않는다.
@@ -123,20 +134,25 @@ def reset_request():
 @limiter.limit("10 per minute")
 def reset_confirm():
     """재설정 토큰으로 새 비밀번호를 설정한다. 토큰은 1회용이며 만료 시각을 확인한다."""
-    data = request.get_json(force=True)
+    data = json_object()
     token = data.get("token", "")
     new_password = data.get("new_password", "")
     policy_error = password_policy_error(new_password)
     if policy_error:
         return jsonify(error=policy_error), 400
 
-    row = query("SELECT user_id, expires_at FROM reset_tokens WHERE token = ? AND used = 0",
-                (_hash_reset_token(token),), one=True)
-    now = datetime.now(timezone.utc).isoformat()
-    if row is None or not row["expires_at"] or row["expires_at"] < now:
+    # 불명 토큰에는 비싼 해시를 계산하지 않는다. 잠금 안에서 반드시 다시 확인한다.
+    token_hash = _hash_reset_token(token)
+    row = query("SELECT 1 FROM reset_tokens WHERE token = ? AND used = 0 AND expires_at > ?",
+                (token_hash, datetime.now(timezone.utc).isoformat()), one=True)
+    if row is None:
         return jsonify(error=_RESET_FAIL_MSG), 400
-
-    # 이 사용자의 미사용 토큰을 모두 소진시켜 재사용·병행 사용을 막는다.
-    execute("UPDATE reset_tokens SET used = 1 WHERE user_id = ?", (row["user_id"],))
-    _set_password(row["user_id"], new_password)
+    password_hash = hash_password(new_password)
+    with transaction():
+        row = query("SELECT user_id FROM reset_tokens WHERE token = ? AND used = 0 AND expires_at > ?",
+                    (token_hash, datetime.now(timezone.utc).isoformat()), one=True)
+        if row is None:
+            return jsonify(error=_RESET_FAIL_MSG), 400
+        _set_password(row["user_id"], password_hash)
+        log.info("비밀번호 재설정 완료: user_id=%s", row["user_id"])
     return jsonify(ok=True)

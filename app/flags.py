@@ -6,6 +6,7 @@
 정답은 SHA-256 해시로만 저장되어 있어 원본/공격법이 노출되지 않는다(채점만 가능).
 """
 import hashlib
+from .validation import json_object
 from flask import Blueprint, request, jsonify
 
 bp = Blueprint("flags", __name__, url_prefix="/api/flags")
@@ -54,7 +55,7 @@ def list_flags():
 
 @bp.post("/check")
 def check_flag():
-    value = request.get_json(force=True).get("value", "")
+    value = json_object().get("value", "")
     h = _h(value)
     for module, keys in ANSWER_HASHES.items():
         for key, ans in keys.items():
@@ -66,7 +67,7 @@ def check_flag():
 
 @bp.post("/score")
 def score():
-    found = set(_h(v) for v in request.get_json(force=True).get("values", []))
+    found = set(_h(v) for v in json_object().get("values", []))
     result, total_got, total_all = {}, 0, 0
     for module, keys in ANSWER_HASHES.items():
         got = sum(1 for ans in keys.values() if ans in found)

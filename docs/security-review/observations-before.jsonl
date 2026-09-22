@@ -1,0 +1,14 @@
+{"probe": "login_csrf", "status": 200, "session_cookie_set": true}
+{"probe": "reset_after_password_change", "change_status": 200, "old_reset_status": 200, "login_with_reset_password": 200}
+{"probe": "reset_token_race", "statuses": [200, 200]}
+{"probe": "editor_can_publish", "before": 404, "publication": 200, "after": 200}
+{"probe": "share_downgrade", "downgrade": 200, "edit_after_downgrade": 200}
+{"probe": "share_boolean_type", "edit_with_string_false": 200}
+{"probe": "malformed_input", "statuses": [500, 500, 500, 500]}
+{"probe": "password_verification_no_limit", "requests": 35, "statuses": [403]}
+{"probe": "large_document", "body_bytes": 1048576, "status": 200}
+{"probe": "sensitive_cache", "cache_control": null, "vary": null}
+{"probe": "file_content_validation", "fake_jpeg_status": 200}
+{"probe": "download_cache", "cache_control": "no-cache"}
+{"probe": "document_delete_retention", "status": 200, "remaining_rows": {"attachments": 1, "shares": 1}, "remaining_files": 1}
+{"probe": "corrupt_key_store", "silently_replaced": true}

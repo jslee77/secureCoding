@@ -1,0 +1,29 @@
+Date: 2026-09-22
+Environment: macOS, Python 3.12.14, Node 25.9.0
+
+$ python -m pytest -q
+........................................................................ [ 54%]
+...........................................................              [100%]
+131 passed in 21.20s
+
+$ node --test tests/frontend.test.cjs
+✔ logout clears sensitive DOM and late profile response cannot repopulate it (2.91175ms)
+✔ failed server logout does not pretend to terminate the session (0.718958ms)
+✔ document pagination requests a bounded page and escapes titles (0.878083ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 69.858625
+
+$ node --check static/app.js
+exit 0
+
+$ pip-audit -r requirements.txt
+30 dependencies, 0 known vulnerabilities, 0 skipped
+See dependency-audit.json (pip-audit 2.10.1).
+
+Not run: Docker/Linux deployment, browser E2E, real LibreOffice, multi-worker Redis.

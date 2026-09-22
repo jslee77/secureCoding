@@ -11,8 +11,12 @@ import subprocess
 from urllib.parse import urlparse
 import certifi
 import urllib3
+from .validation import json_object
 from flask import Blueprint, request, jsonify, current_app, send_file
-from .db import query, execute
+from .db import query, execute, transaction
+from .quotas import insert_document
+from . import limiter
+from .auth import account_limit_key
 from .auth import require_login
 from .sharing import require_admin, can_access
 from .utils import safe_filename
@@ -26,6 +30,7 @@ PREVIEW_MAX_BYTES = 2000
 
 
 @bp.post("/export/<int:doc_id>")
+@limiter.limit("3 per minute", key_func=account_limit_key)
 def export_document(doc_id):
     """문서 본문을 PDF로 변환해 내려준다."""
     ident = require_login()
@@ -34,7 +39,7 @@ def export_document(doc_id):
     doc = query("SELECT * FROM documents WHERE id = ?", (doc_id,), one=True)
     if not doc or not can_access(doc_id, ident["sub"]):
         return jsonify(error="문서를 찾을 수 없습니다."), 404
-    data = request.get_json(force=True)
+    data = json_object()
     # 파일명 정규화 + 확장자 강제, shell 미사용(명령 주입 차단)
     out_name = safe_filename(data.get("filename", f"doc_{doc_id}.pdf"))
     if not out_name.lower().endswith(".pdf"):
@@ -76,24 +81,23 @@ def import_backup():
     ident = require_login()
     if not ident:
         return jsonify(error="로그인이 필요합니다."), 401
-    data = request.get_json(force=True)
+    data = json_object()
     # 코드 실행이 없는 데이터 포맷만 허용 (pickle/yaml.Loader 역직렬화 RCE 제거)
     backup = data.get("backup")
     if not isinstance(backup, dict):
         return jsonify(error="백업 형식이 올바르지 않습니다(JSON 객체 필요)."), 400
-    title = str(backup.get("title", "(가져온 문서)"))[:200]
-    body = str(backup.get("body", ""))
+    title = backup.get("title", "(가져온 문서)")
+    body = backup.get("body", "")
     visibility = backup.get("visibility", "private")
     if visibility not in VALID_VISIBILITY:
         visibility = "private"
-    doc_id = execute(
-        "INSERT INTO documents (owner_id, title, body, visibility) VALUES (?, ?, ?, ?)",
-        (ident["sub"], title, body, visibility))
+    with transaction():
+        doc_id = insert_document(ident["sub"], title, body, visibility)
     return jsonify(ok=True, id=doc_id)
 
 
 def _is_public_ip(ip):
-    return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+    return ip.is_global and not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
                 or ip.is_multicast or ip.is_unspecified)
 
 
@@ -138,6 +142,7 @@ def _fetch_pinned(parsed, ip):
 
 
 @bp.get("/preview")
+@limiter.limit("10 per minute", key_func=account_limit_key)
 def preview_url():
     """외부 문서 URL의 미리보기를 가져온다 (허용목록 + 사설망 차단 + IP 고정)."""
     if not require_login():
@@ -168,6 +173,8 @@ def preview_url():
 @bp.get("/internal/metadata")
 def internal_metadata():
     """내부 전용 메타데이터. 출처 IP가 아니라 관리자 인증으로 보호."""
+    if not current_app.config["ENABLE_TRAINING_ROUTES"]:
+        return jsonify(error="찾을 수 없습니다."), 404
     if not require_admin():
         return jsonify(error="권한이 없습니다."), 403
     return jsonify(zone="internal", metadata="INT-META-9090")

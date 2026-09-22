@@ -23,41 +23,60 @@ def _fernet_key():
     return Fernet.generate_key().decode()
 
 
-def _load_or_create_secrets():
-    """환경변수 우선, 없으면 파일에서 로드, 그래도 없으면 생성·저장."""
-    keys = {
-        "JWT_SECRET": os.environ.get("JWT_SECRET"),
-        "SECRET_KEY": os.environ.get("SECRET_KEY"),
-        "DATA_KEY": os.environ.get("DATA_KEY"),
-    }
-    stored = {}
-    if os.path.exists(_SECRET_STORE):
-        try:
-            with open(_SECRET_STORE, "r", encoding="utf-8") as f:
-                stored = json.load(f)
-        except Exception:
-            stored = {}
-
-    changed = False
-    for name in keys:
-        if keys[name]:
-            continue
-        if stored.get(name):
-            keys[name] = stored[name]
-            continue
-        keys[name] = _fernet_key() if name == "DATA_KEY" else _secrets.token_hex(32)
-        stored[name] = keys[name]
-        changed = True
-
-    if changed:
-        os.makedirs(os.path.dirname(_SECRET_STORE), exist_ok=True)
-        with open(_SECRET_STORE, "w", encoding="utf-8") as f:
-            json.dump(stored, f)
-        try:
-            os.chmod(_SECRET_STORE, 0o600)
-        except OSError:
-            pass
+def _validate_keys(keys):
+    from cryptography.fernet import Fernet
+    for name in ("JWT_SECRET", "SECRET_KEY"):
+        if not isinstance(keys.get(name), str) or len(keys[name].encode()) < 32:
+            raise RuntimeError(f"{name} must contain at least 32 bytes")
+    try:
+        Fernet(keys["DATA_KEY"].encode("ascii"))
+    except (KeyError, AttributeError, ValueError, UnicodeError):
+        raise RuntimeError("Invalid DATA_KEY") from None
     return keys
+
+
+def _load_or_create_secrets():
+    """키가 없을 때만 생성. 기존 저장소 오류에서는 덮어쓰지 않고 시작 중단."""
+    import fcntl
+    import stat
+    import tempfile
+    keys = {name: os.environ.get(name) for name in ("JWT_SECRET", "SECRET_KEY", "DATA_KEY")}
+    if all(keys.values()):
+        return _validate_keys(keys)
+    directory = os.path.dirname(_SECRET_STORE)
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    lock_fd = os.open(_SECRET_STORE + ".lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        try:
+            fd = os.open(_SECRET_STORE, os.O_RDONLY | os.O_NOFOLLOW)
+        except FileNotFoundError:
+            stored = {"JWT_SECRET": _secrets.token_hex(32),
+                      "SECRET_KEY": _secrets.token_hex(32), "DATA_KEY": _fernet_key()}
+            fd, temporary = tempfile.mkstemp(prefix=".secret-", dir=directory)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                    json.dump(stored, stream)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, _SECRET_STORE)
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+        else:
+            with os.fdopen(fd, "r", encoding="utf-8") as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_uid != os.geteuid():
+                    raise RuntimeError("Secret store must be owner-only (0600)")
+                try:
+                    stored = json.load(stream)
+                except (ValueError, UnicodeError):
+                    raise RuntimeError("Corrupt secret store; restore the existing keys") from None
+            if not isinstance(stored, dict):
+                raise RuntimeError("Invalid secret store")
+        return _validate_keys({name: value or stored.get(name) for name, value in keys.items()})
+    finally:
+        os.close(lock_fd)
 
 
 _SECRETS = _load_or_create_secrets()
@@ -87,6 +106,15 @@ class Config:
 
     # 업로드 최대 크기 (16MB)
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024
+    DOCUMENT_MAX_CHARS = 64 * 1024
+    COMMENT_MAX_CHARS = 4000
+    MAX_DOCUMENTS_PER_USER = 1000
+    MAX_COMMENTS_PER_DOCUMENT = 1000
+    MAX_ATTACHMENTS_PER_USER = 200
+    MAX_STORAGE_BYTES_PER_USER = 100 * 1024 * 1024
+    MAX_FILE_BYTES = 8 * 1024 * 1024
+    COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "0") == "1"
+    ENABLE_TRAINING_ROUTES = os.environ.get("ENABLE_TRAINING_ROUTES", "0") == "1"
 
     # 문서 -> PDF 변환기 (LibreOffice). 없으면 내보내기는 503 을 반환한다.
     CONVERTER_BIN = os.environ.get("CONVERTER_BIN", "/usr/bin/soffice")

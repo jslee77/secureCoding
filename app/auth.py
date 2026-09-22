@@ -6,9 +6,10 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 import jwt
-from flask import Blueprint, request, jsonify, g, make_response
+from .validation import json_object
+from flask import Blueprint, request, jsonify, g, make_response, current_app
 from . import limiter
-from .db import query, execute
+from .db import query, execute, transaction
 from .utils import (hash_password, verify_password, password_needs_upgrade,
                     password_policy_error, issue_jwt, decode_jwt, generate_token)
 
@@ -29,6 +30,26 @@ USERNAME_PATTERN = re.compile(r"[A-Za-z0-9_]{3,32}")
 CSRF_HEADER = "X-Requested-With"
 CSRF_HEADER_VALUE = "SecureDocs"
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def account_limit_key():
+    # Limiter의 before_request는 신원 로더보다 먼저 실행될 수 있다.
+    token, _ = _token_from_request()
+    if token:
+        try:
+            claims = decode_jwt(token)
+            return "user:" + str(int(claims["sub"]))
+        except (jwt.InvalidTokenError, KeyError, ValueError, TypeError):
+            pass
+    return "ip:" + (request.remote_addr or "unknown")
+
+
+def login_limit_key():
+    import hashlib
+    data = request.get_json(silent=True)
+    name = data.get("username", "") if isinstance(data, dict) else ""
+    name = name if isinstance(name, str) else ""
+    return "login:" + hashlib.sha256(name[:32].encode()).hexdigest()
 
 
 def _token_from_request():
@@ -74,10 +95,15 @@ def load_identity():
 
 
 def enforce_csrf():
-    """쿠키로 인증된 상태 변경 요청에 CSRF 방어 헤더가 없으면 거부한다."""
-    if request.method in _SAFE_METHODS or getattr(g, "auth_via", None) != "cookie":
+    """세션 생성 및 쿠키 인증의 변경 요청에는 커스텀 헤더를 요구한다."""
+    if request.method in _SAFE_METHODS:
         return None
-    if request.headers.get(CSRF_HEADER) != CSRF_HEADER_VALUE:
+    creates_session = request.endpoint in {"auth.login", "auth.register"}
+    if not creates_session and getattr(g, "auth_via", None) != "cookie":
+        return None
+    if (request.headers.get(CSRF_HEADER) != CSRF_HEADER_VALUE
+            or request.headers.get("Sec-Fetch-Site") == "cross-site"
+            or (request.headers.get("Origin") and request.headers["Origin"] != request.host_url.rstrip("/"))):
         return jsonify(error="요청 출처를 확인할 수 없습니다."), 403
     return None
 
@@ -109,14 +135,14 @@ def session_response(user):
         id=user["id"], username=user["username"], role=user["role"], token=token))
     # HttpOnly(JS 접근 차단) + SameSite + (HTTPS일 때) Secure
     resp.set_cookie("token", token, httponly=True, samesite="Lax",
-                    secure=request.is_secure)
+                    secure=current_app.config["COOKIE_SECURE"] or request.is_secure)
     return resp
 
 
 @bp.post("/register")
 @limiter.limit("10 per hour")   # 아이디 존재 여부를 대량으로 확인하지 못하게 제한
 def register():
-    data = request.get_json(force=True)
+    data = json_object()
     username = data.get("username", "")
     password = data.get("password", "")
     full_name = data.get("full_name", "")
@@ -142,8 +168,10 @@ def register():
 
 
 @bp.post("/login")
+@limiter.limit("15 per minute", key_func=login_limit_key)
+@limiter.limit("30 per minute")
 def login():
-    data = request.get_json(force=True)
+    data = json_object()
     username = data.get("username", "")
     password = data.get("password", "")
 
@@ -157,8 +185,8 @@ def login():
 
     # 레거시(무솔트 SHA-256) 해시는 로그인 성공 시 argon2 로 업그레이드한다.
     if password_needs_upgrade(user["password_hash"]):
-        execute("UPDATE users SET password_hash = ? WHERE id = ?",
-                (hash_password(password), user["id"]))
+        execute("UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?",
+                (hash_password(password), user["id"], user["password_hash"]))
 
     log.info("로그인 성공: %s", username)   # api_token 은 로그에 남기지 않는다.
     return session_response(user)
@@ -191,5 +219,8 @@ def refresh():
     u = current_user()
     if not ident or not u:
         return jsonify(error="로그인이 필요합니다."), 401
-    revoke_token(ident)
-    return session_response(u)
+    with transaction():
+        if not _is_token_active(ident):
+            return jsonify(error="로그인이 필요합니다."), 401
+        revoke_token(ident)
+        return session_response(current_user())

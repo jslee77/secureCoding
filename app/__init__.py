@@ -3,7 +3,7 @@ SecureDocs 애플리케이션 팩토리.
 """
 import os
 import logging
-from flask import Flask, request, send_from_directory
+from flask import Flask, request, send_from_directory, abort
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -63,7 +63,7 @@ def create_app(test_config=None):
 
     limiter.init_app(app)
 
-    from .auth import bp as auth_bp, load_identity, enforce_csrf
+    from .auth import bp as auth_bp, load_identity, enforce_csrf, account_limit_key
     from .documents import bp as documents_bp
     from .comments import bp as comments_bp
     from .files import bp as files_bp
@@ -77,12 +77,20 @@ def create_app(test_config=None):
     app.before_request(enforce_csrf)
 
     for bp in (auth_bp, documents_bp, comments_bp, files_bp, profile_bp,
-               sharing_bp, tools_bp, flags_bp):
+               sharing_bp, tools_bp):
         app.register_blueprint(bp)
+    if app.config["ENABLE_TRAINING_ROUTES"]:
+        app.register_blueprint(flags_bp)
 
     # 인증/채점 등 남용 표면에 레이트리밋 적용 (계정 열거·무차별 대입 완화)
     limiter.limit("30 per minute")(auth_bp)
     limiter.limit("60 per minute")(flags_bp)
+    for bp in (documents_bp, comments_bp, files_bp, sharing_bp, tools_bp, profile_bp):
+        limiter.limit("120 per minute", key_func=account_limit_key)(bp)
+
+    from .files import cleanup_deleted_files
+    with app.app_context():
+        cleanup_deleted_files()
 
     # 모든 응답에 보안 헤더 부착
     @app.after_request
@@ -91,6 +99,8 @@ def create_app(test_config=None):
             resp.headers.setdefault(key, value)
         if request.is_secure:
             resp.headers.setdefault("Strict-Transport-Security", HSTS)
+        if request.path.startswith("/api/"):
+            resp.headers["Cache-Control"] = "no-store"
         return resp
 
     # 정적 프론트엔드
@@ -102,10 +112,17 @@ def create_app(test_config=None):
 
     @app.get("/flags")
     def flags_page():
+        if not app.config["ENABLE_TRAINING_ROUTES"]:
+            abort(404)
         return send_from_directory(static_dir, "flags.html")
 
     @app.get("/static/<path:path>")
     def static_files(path):
+        allowed = {"app.js", "style.css", "index.html"}
+        if app.config["ENABLE_TRAINING_ROUTES"]:
+            allowed.update({"flags.html", "flags.js"})
+        if path not in allowed:
+            abort(404)
         return send_from_directory(static_dir, path)
 
     return app

@@ -21,6 +21,11 @@ jobs:
         run: pip install -r requirements-dev.txt
       - name: Security regression tests
         run: python -m pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Frontend security tests
+        run: node --test tests/frontend.test.cjs
       - name: Dependency vulnerability scan
         run: |
           pip install pip-audit
