@@ -35,7 +35,7 @@ Verified explicit SEED_DEMO_DATA=0, ENABLE_TRAINING_ROUTES=1, CONVERTER_BIN,
 JWT_SECRET, SECRET_KEY, DATA_KEY passthrough and 127.0.0.1 port binding.
 Actual secrets were not printed.
 
-Markdown: 114 local links/anchors in README.md and docs/*.md checked; 0 errors.
+Initial O review Markdown: 114 local links/anchors in README.md and docs/*.md checked; 0 errors.
 Historical V/R/S diagnostic excerpts remain labeled as historical.
 
 $ git diff --check
@@ -46,3 +46,25 @@ remote CI result verification, live-service destructive reseed/volume removal.
 Operational failure handling uses isolated command doubles; app reseed tests
 use temporary databases/files. The production Compose service and volumes
 were not changed by these checks.
+
+Documentation follow-up: 2026-09-23, reviewed against application commit 8df20f5.
+Changes: API/UI scope, profile PUT replacement behavior, JWT rotation usage,
+request payloads and errors, public-document access, local/Compose settings,
+logs, backup/restore boundaries, static-analysis scope, historical/current navigation.
+Application Python and operational scripts unchanged in this follow-up.
+static/index.html: three text labels corrected; tags, IDs and attributes unchanged.
+
+Follow-up checks:
+- 118 local Markdown links/anchors across 6 documents: 0 errors.
+- 13 inline JSON API examples parsed successfully.
+- Current README/result/operations Bash examples: bash -n passed.
+- Compose environment precedence: dummy .env SEED_DEMO_DATA=1 overridden
+  by shell SEED_DEMO_DATA=0; rendered config inspected without printing secrets.
+- scripts/test.sh --frontend: 3 passed, 0 failed, 0 skipped.
+- HTML tags and attributes match the previous commit; display-text-only diff.
+- git diff --check: passed.
+
+The 150 Python tests and security scan results above are retained from the
+preceding implementation verification; they were not rerun for this documentation
+and display-text-only follow-up. No live data, backup restore, TLS proxy or browser
+E2E exercise was performed during the documentation review.
