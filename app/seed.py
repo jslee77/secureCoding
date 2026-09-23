@@ -4,19 +4,28 @@
     python -m app.seed
 """
 import os
+import secrets
 from . import create_app
 from .db import executescript, execute, ensure_schema
 from .utils import hash_password, encrypt_field, generate_token
 
-TABLES = ("pending_file_deletions", "comments", "shares", "attachments",
+TABLES = ("comments", "shares", "attachments",
           "reset_tokens", "revoked_tokens", "documents", "users")
 
 
 def seed(app=None):
     app = app or create_app()
     with app.app_context():
+        # DB 초기화 전에 첨부를 삭제 큐에 보존한다. 기존 실패 작업도 유지한다.
+        execute("INSERT OR IGNORE INTO pending_file_deletions (stored_name) "
+                "SELECT stored_name FROM attachments")
         executescript("".join(f"DROP TABLE IF EXISTS {t};" for t in TABLES))
         ensure_schema()
+        from .files import cleanup_deleted_files
+        cleanup_deleted_files()
+
+        # 같은 사용자 ID를 다시 생성해도 이전 JWT가 되살아나지 않게 한다.
+        token_epoch = secrets.randbits(62) + 1
 
         # (username, pw, role, name, email, phone, ssn, api_token)
         users = [
@@ -28,7 +37,7 @@ def seed(app=None):
              "010-5555-6666", "880303-1456789", generate_token()),
             ("carol", "carol123", "user", "최캐롤", "carol@company.com",
              "010-7777-8888", "950404-2567890", generate_token()),
-            # 내부 서비스 계정 — 계정 열거로 존재가 드러난다
+            # 교육용 내부 서비스 계정 (실제 운영 자격증명이 아님)
             ("svc_backup", "B@ckup!2019#svc", "user", "백업 서비스", None,
              None, None, generate_token()),
         ]
@@ -36,9 +45,9 @@ def seed(app=None):
         for username, pw, role, name, email, phone, ssn, token in users:
             ids[username] = execute(
                 "INSERT INTO users (username, password_hash, role, full_name, email, "
-                "phone, ssn_enc, api_token) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "phone, ssn_enc, api_token, token_epoch) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (username, hash_password(pw), role, name, email, phone,
-                 encrypt_field(ssn) if ssn else None, token))
+                 encrypt_field(ssn) if ssn else None, token, token_epoch))
 
         docs = [
             (ids["admin"], "2025 보안 정책",
@@ -62,7 +71,7 @@ def seed(app=None):
         execute("INSERT INTO shares (document_id, user_id, can_edit) VALUES (?, ?, ?)",
                 (doc_ids[2], ids["bob"], 0))
 
-        # 서버에 남아있는 민감 파일들 (경로조작 / RCE 로 접근)
+        # 과거 공격 실습용 가짜 값 (실제 운영 자격증명이 아님)
         os.makedirs(os.path.dirname(app.config["LOG_FILE"]), exist_ok=True)
         with open(os.path.join(os.path.dirname(app.config["LOG_FILE"]),
                                "DO_NOT_SHARE.txt"), "w", encoding="utf-8") as f:

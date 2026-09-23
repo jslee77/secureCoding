@@ -4,8 +4,8 @@ services:
     ports:
       - "127.0.0.1:5000:5000"
     environment:
-      # 로컬 확인용 데모 데이터. 운영에서는 지우고 시크릿(JWT_SECRET 등)을 주입한다.
-      SEED_DEMO_DATA: "1"
+      # 로컬 기본값은 데모. 운영에서는 반드시 0으로 설정하고 시크릿을 주입한다.
+      SEED_DEMO_DATA: "${SEED_DEMO_DATA:-1}"
       # 아래 값들은 있으면 .env 에서 주입(scripts/gen-secrets.sh), 없으면 빈 값 → 앱이 자동 생성.
       JWT_SECRET: "${JWT_SECRET:-}"
       SECRET_KEY: "${SECRET_KEY:-}"
@@ -13,6 +13,8 @@ services:
       COOKIE_SECURE: "${COOKIE_SECURE:-0}"
       TRUST_PROXY_HOPS: "${TRUST_PROXY_HOPS:-0}"
       RATELIMIT_STORAGE_URI: "${RATELIMIT_STORAGE_URI:-memory://}"
+      ENABLE_TRAINING_ROUTES: "${ENABLE_TRAINING_ROUTES:-0}"
+      CONVERTER_BIN: "${CONVERTER_BIN:-/usr/bin/soffice}"
     volumes:
       # 소스는 이미지에 고정하고, DB·업로드·시크릿만 볼륨으로 보존한다.
       - securedocs-data:/app/instance

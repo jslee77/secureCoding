@@ -25,8 +25,8 @@ if [ "$MODE" = local ]; then
 fi
 
 require_docker
-if is_running; then ok "이미 실행 중입니다."; exec "$(dirname "$0")/status.sh"; fi
-log "Docker Compose 기동${BUILD:+ (빌드 포함)}"
+if is_running; then ok "이미 실행 중입니다."; exec "$ROOT/scripts/status.sh"; fi
+log "Docker Compose 기동 (build=$BUILD)"
 if [ "$BUILD" = 1 ]; then compose up -d --build; else compose up -d; fi
 if wait_for_health 60; then
   ok "기동 완료 → ${URL}"

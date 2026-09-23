@@ -9,3 +9,8 @@ docs/
 *.pyc
 .pytest_cache/
 cj.txt
+.env
+.env.*
+.venv/
+venv/
+.DS_Store

@@ -4,6 +4,7 @@
 import re
 import logging
 import sqlite3
+import secrets
 from datetime import datetime, timezone
 import jwt
 from .validation import json_object
@@ -156,9 +157,10 @@ def register():
     password_hash = hash_password(password)
     try:
         uid = execute(
-            "INSERT INTO users (username, password_hash, role, full_name, api_token) "
-            "VALUES (?, ?, 'user', ?, ?)",
-            (username, password_hash, full_name, generate_token()),
+            "INSERT INTO users (username, password_hash, role, full_name, api_token, token_epoch) "
+            "VALUES (?, ?, 'user', ?, ?, ?)",
+            # 재시드 후 ID가 재사용되어도 이전 계정의 JWT를 수락하지 않는다.
+            (username, password_hash, full_name, generate_token(), secrets.randbits(62) + 1),
         )
     except sqlite3.IntegrityError:
         return jsonify(error="사용할 수 없는 아이디입니다."), 409

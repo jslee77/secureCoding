@@ -53,7 +53,7 @@ def export_document(doc_id):
         with open(src_path, "w", encoding="utf-8") as f:
             f.write(f"{doc['title']}\n\n{doc['body'] or ''}")
         try:
-            # shell 미사용, argv 고정(설정값 변환기 + 서버 생성 경로) → 임의 명령 실행 불가
+            # 신뢰된 설정의 실행 파일과 분리된 인자, shell=False로 셸 해석 차단.
             result = subprocess.run(  # nosec B603
                 [converter, "--headless", "--convert-to", "pdf", "--outdir", workdir, src_path],
                 shell=False, capture_output=True, text=True,

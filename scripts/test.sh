@@ -20,9 +20,14 @@ for a in "$@"; do case "$a" in
 esac; done
 
 run_frontend() {
-  if have node; then log "프론트 보안 테스트 (node)"; node --test tests/frontend.test.cjs; ok "프론트 테스트 통과";
-  else warn "node 가 없어 프론트 테스트를 건너뜁니다. Node 설치 후 'node --test tests/frontend.test.cjs' 실행."; fi
+  have node || die "프론트 검증에 node 가 필요합니다. Node 24+를 설치하세요."
+  log "프론트 보안 테스트 (node)"
+  node --test tests/frontend.test.cjs || return $?
+  ok "프론트 테스트 통과"
 }
+
+# 프론트 단독 검증에는 Python 설치나 Docker 데몬이 필요하지 않다.
+if [ "$RUN" = frontend ]; then run_frontend; exit 0; fi
 
 if [ "$LOCAL" = 1 ]; then
   have python3 || die "python3 가 필요합니다."
@@ -31,16 +36,14 @@ if [ "$LOCAL" = 1 ]; then
   PY=.venv/bin/python; BANDIT=.venv/bin/bandit; AUDIT=.venv/bin/pip-audit
   case "$RUN" in
     unit) "$PY" -m pytest -q;;
-    scan) "$BANDIT" -r app/ && "$AUDIT" -r requirements.txt;;
-    frontend) run_frontend;;
-    all) "$PY" -m pytest -q && "$BANDIT" -r app/ && "$AUDIT" -r requirements.txt && run_frontend;;
+    scan) "$BANDIT" -r app/; "$AUDIT" -r requirements.txt;;
+    all) "$PY" -m pytest -q; "$BANDIT" -r app/; "$AUDIT" -r requirements.txt; run_frontend;;
   esac
   ok "로컬 검증 완료"; exit 0
 fi
 
 # --- Docker 모드 (기본) ---
 require_docker
-if [ "$RUN" = frontend ]; then run_frontend; exit 0; fi
 log "테스트 이미지 빌드: $IMAGE_TEST"; docker build -q -t "$IMAGE_TEST" . >/dev/null
 case "$RUN" in
   unit)  CMD='pip install -q -r requirements-dev.txt >/dev/null && python -m pytest -q';;
@@ -49,6 +52,7 @@ case "$RUN" in
 esac
 log "컨테이너에서 실행 (Python 3.12)"
 # 원본을 읽기전용으로 마운트하고 쓰기 가능한 사본에서 실행 (instance/ 오염 방지)
-docker run --rm -u root -v "$ROOT":/src:ro "$IMAGE_TEST" sh -c "cp -a /src /w && cd /w && $CMD"
+docker run --rm -u root -v "$ROOT":/src:ro "$IMAGE_TEST" sh -c \
+  "mkdir /w && cp -a /src/app /src/tests /src/scripts /src/static /src/requirements*.txt /src/.dockerignore /src/docker-compose.yml /w/ && cd /w && $CMD"
 ok "Docker 검증 통과"
-[ "$RUN" = all ] && run_frontend || true
+if [ "$RUN" = all ]; then run_frontend; fi

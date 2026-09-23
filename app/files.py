@@ -81,7 +81,7 @@ def upload(doc_id):
         candidate.write(content)
         candidate.flush()
         try:
-            # shell 미사용, argv 고정(서버 생성 임시경로 + 검증된 확장자) → 임의 명령 실행 불가
+            # 고정 파서와 서버 생성 임시경로, 허용된 확장자를 인자로 전달; 셸 해석 없음.
             result = subprocess.run(  # nosec B603
                 [sys.executable, os.path.join(os.path.dirname(__file__), "file_validation.py"), candidate.name, ext],
                 timeout=5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)

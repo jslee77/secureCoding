@@ -2,8 +2,8 @@
 
 문서와 메모를 작성하고, 팀원과 공유하고, 파일을 첨부해 함께 논의하는 **Flask 기반 문서 공유 플랫폼**입니다.
 
-초기 취약점 23건(V), 후속 하드닝 10건(R)에 이어 2026-09-22 재점검의 11개 항목(S)을 코드에 반영했습니다. 인증·인가의 동시 요청, 입력 검증, 데이터 삭제와 키 관리까지 다루는 학습용 레퍼런스입니다.
-Python 회귀 테스트 **131개**, 프론트 보안 테스트 **3개**, 의존성 감사를 CI에서 실행합니다. 테스트가 보장하는 범위와 운영 과제는 결과 보고서에 명시합니다.
+초기 취약점 23건(V), 후속 하드닝 10건(R)에 이어 2026-09-22 재점검의 11개 항목(S)과 운영 완결성 점검의 6개 항목(O)을 코드에 반영했습니다. 인증·인가의 동시 요청, 입력 검증, 데이터 삭제와 키 관리까지 다루는 학습용 레퍼런스입니다.
+Python 회귀 테스트 **150개**, 프론트 보안 테스트 **3개**, 정적 분석·의존성 감사를 CI에서 실행하도록 구성했습니다. 테스트가 보장하는 범위와 운영 과제는 결과 보고서에 명시합니다.
 
 보안 작업은 다음 문서에 **진단 → 개선 → 검증** 순서로 정리돼 있습니다.
 
@@ -22,6 +22,8 @@ Python 회귀 테스트 **131개**, 프론트 보안 테스트 **3개**, 의존�
 ---
 
 ## 주요 기능
+
+아래는 API 기준 기능입니다. 기본 웹 화면은 주요 문서·댓글·첨부·프로필 작업을 제공하며, 모든 API에 대응하는 UI가 있는 것은 아닙니다. 비밀번호 복구 발송과 실제 PDF 변환은 별도 연동이 필요합니다. API 토큰은 조회·재발급만 제공하며 현재 인증 수단으로 쓰이지 않습니다.
 
 | 영역 | 기능 |
 |---|---|
@@ -55,7 +57,7 @@ docker compose up --build   # 또는 scripts/start.sh
 <http://localhost:5000> 에 접속합니다.
 - 루프백(`127.0.0.1`)에만 포트를 공개하고 비루트 gunicorn **1 워커**를 실행합니다.
 - DB · 업로드 · 시크릿은 `securedocs-data` 볼륨에 보존됩니다.
-- 로컬 확인용으로 `SEED_DEMO_DATA=1`이 설정돼 있어, 첫 기동 때 데모 데이터가 들어갑니다.
+- 로컬 확인용으로 `SEED_DEMO_DATA=1`이 설정돼 있어, DB가 없는 첫 기동 때 데모 데이터가 들어갑니다. `.env`에 `SEED_DEMO_DATA=0`을 지정하면 시드하지 않습니다.
 
 ### 로컬 Python (개발)
 
@@ -72,7 +74,7 @@ python run.py           # 개발 서버 — 운영에는 쓰지 마세요
 ```bash
 scripts/seed.sh                                    # 스크립트 (확인 후 재시드, 권장)
 python -m app.seed                                 # 로컬 직접 실행
-docker compose exec securedocs python -m app.seed  # Docker 직접 실행
+# Docker 재시드는 scripts/seed.sh 사용: 중지 → 초기화 → 성공 시 재기동
 ```
 
 앱 기동 시 필요한 컬럼·인덱스·삭제 큐를 추가하고 중복 공유는 최근 요청으로 정리합니다. **위 seed 명령은 기존 DB를 초기화하므로 업그레이드에 사용하지 마세요.** 키·DB·파일을 백업하고 [업그레이드 절차](docs/03-결과보고서.md#4-기존-데이터의-업그레이드)를 따라야 합니다.
@@ -80,14 +82,14 @@ docker compose exec securedocs python -m app.seed  # Docker 직접 실행
 ### 테스트
 
 ```bash
-scripts/test.sh              # 전체: 회귀 131 + 프론트 3 + bandit + pip-audit (Docker, 권장)
+scripts/test.sh              # 전체: 회귀 150 + 프론트 3 + bandit + pip-audit (Docker, 권장)
 scripts/test.sh --local      # Docker 대신 로컬 .venv 사용
 ```
 
 스크립트 없이 직접 실행하려면:
 
 ```bash
-pip install -r requirements-dev.txt
+pip install -r requirements-dev.txt pip-audit
 python -m pytest -q
 node --test tests/frontend.test.cjs  # CI는 Node 24
 bandit -r app/                       # 정적 보안 분석 (지적 0건)
@@ -106,7 +108,7 @@ pip-audit -r requirements.txt        # 의존성 취약점 감사
 | bob | bob123 | 일반 |
 | carol | carol123 | 일반 |
 
-> 로컬 확인용 시드 데이터입니다. 운영 환경에서는 `SEED_DEMO_DATA`를 설정하지 마세요.
+> 로컬 확인용 시드 데이터입니다. 운영 환경에서는 `SEED_DEMO_DATA=0`을 명시하세요. Compose 기본값은 `1`입니다.
 
 ---
 
@@ -119,7 +121,7 @@ pip-audit -r requirements.txt        # 의존성 취약점 감사
 | `JWT_SECRET` | JWT 서명 키 (HS256) | 자동 생성 · 예: `openssl rand -hex 32` |
 | `SECRET_KEY` | Flask 세션 서명 키 | 자동 생성 |
 | `DATA_KEY` | 개인정보 암호화 키 (Fernet) | 자동 생성 · `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
-| `SEED_DEMO_DATA` | `1`이면 DB가 없을 때 데모 데이터 시드 (Docker) | 미설정 |
+| `SEED_DEMO_DATA` | `1`이면 DB가 없을 때 데모 데이터 시드 (Docker) | 앱/이미지 미설정, Compose `1` (운영 `0`) |
 | `TRUST_PROXY_HOPS` | 앞단 리버스 프록시 수 — `X-Forwarded-*`를 신뢰할 단계 | `0` |
 | `RATELIMIT_STORAGE_URI` | 레이트리밋 카운터 저장소 (예: `redis://redis:6379/0`, `pip install redis` 필요) | `memory://` |
 | `COOKIE_SECURE` | `1`이면 HTTPS 판단과 별도로 Secure 쿠키 강제 | `0` (운영 `1`) |
@@ -158,7 +160,7 @@ pip-audit -r requirements.txt        # 의존성 취약점 감사
 appA/
 ├── run.py                 # 개발 서버 (SEED_DEMO_DATA=1 + DB 부재일 때만 시드)
 ├── requirements.txt       # 런타임 의존성
-├── requirements-dev.txt   # + pytest
+├── requirements-dev.txt   # + pytest · bandit
 ├── Dockerfile             # 비루트 gunicorn 이미지
 ├── docker-compose.yml     # 로컬 실행 (데모 데이터 · 데이터 볼륨)
 ├── .github/workflows/     # CI — 테스트 + bandit + pip-audit
@@ -253,11 +255,12 @@ curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:5000/api/auth/lo
 `Dockerfile`은 운영 형태(비루트 gunicorn, 이미지에 시크릿 미포함, 기본값은 빈 DB)로 만들어져 있습니다.
 서버 운영 명령은 [운영 문서](docs/운영문서.md), 상세 절차와 한계는 [결과 보고서](docs/03-결과보고서.md)에 있습니다. 실제 운영 배포는 별도 검증이 필요합니다.
 
-- [ ] `SEED_DEMO_DATA`를 설정하지 않기 (데모 계정의 비밀번호는 공개돼 있음)
-- [ ] `scripts/gen-secrets.sh`로 `JWT_SECRET` · `SECRET_KEY` · `DATA_KEY`(Fernet) 생성·주입
+- [ ] `SEED_DEMO_DATA=0` 명시 (Compose 기본값은 `1`, 기존 데모 계정은 별도 폐기)
+- [ ] 신규 설치에서만 `scripts/gen-secrets.sh`로 키 생성·주입; 기존 DB는 기존 `DATA_KEY` 보존 (자동 재암호화 없음)
 - [ ] TLS 프록시·HTTP→HTTPS·백엔드 직접 접근 차단, `TRUST_PROXY_HOPS`와 `COOKIE_SECURE=1` 설정
 - [ ] 워커·서버가 여럿이면 `RATELIMIT_STORAGE_URI`로 공유 저장소 지정
 - [ ] `ENABLE_TRAINING_ROUTES=0` 유지, 기존 데모 계정/볼륨을 운영에 재사용하지 않기
+- [ ] 최초 관리자 생성 절차 마련 (회원가입은 일반 사용자만 생성, 관리자 부트스트랩 명령 미제공)
 - [ ] 비밀번호 복구 발송 채널, 로그/백업 보존 정책, 실제 PDF 변환 실행환경 구성
 - [ ] 파일 삭제 재시도 예약: `flask --app 'app:create_app()' files cleanup`
 

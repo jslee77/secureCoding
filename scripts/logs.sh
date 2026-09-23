@@ -3,4 +3,4 @@
 source "$(dirname "$0")/lib.sh"
 case "${1:-}" in -h|--help) echo "사용법: scripts/logs.sh [docker compose logs 인자...]"; exit 0;; esac
 require_docker
-exec compose logs -f --tail="${TAIL:-100}" "$@" "$SERVICE"
+exec docker compose logs -f --tail="${TAIL:-100}" "$@" "$SERVICE"

@@ -42,11 +42,13 @@ is_running() {
 
 # HTTP 헬스체크 (기본 40초 대기)
 wait_for_health() {
-  local timeout="${1:-40}" i=0
+  local timeout="${1:-40}" deadline=$((SECONDS + ${1:-40})) remaining
+  have curl || die "헬스체크에 curl 이 필요합니다."
   log "헬스체크 대기: ${URL}/ (최대 ${timeout}s)"
-  while [ "$i" -lt "$timeout" ]; do
-    if curl -fsS -o /dev/null -m 3 "${URL}/" 2>/dev/null; then ok "정상 응답 확인 (${URL})"; return 0; fi
-    sleep 1; i=$((i+1))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    remaining=$((deadline - SECONDS))
+    if curl -fsS -o /dev/null -m "$((remaining < 3 ? remaining : 3))" "${URL}/" 2>/dev/null; then ok "정상 응답 확인 (${URL})"; return 0; fi
+    [ "$SECONDS" -ge "$deadline" ] || sleep 1
   done
   return 1
 }

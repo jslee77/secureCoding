@@ -1,29 +1,48 @@
-Date: 2026-09-22
-Environment: macOS, Python 3.12.14, Node 25.9.0
+Review: 2026-09-22 through 2026-09-23
+Environment: local Docker/Linux Python 3.12.14; macOS Node 25.9.0
+Scope: S-01..S-11 and operational completeness O-01..O-06.
 
-$ python -m pytest -q
-........................................................................ [ 54%]
-...........................................................              [100%]
-131 passed in 21.20s
+$ scripts/test.sh
+150 passed in 21.54s
+bandit 1.9.4: 1507 LOC, 0 findings, 10 explicitly suppressed issues
+pip-audit: No known vulnerabilities found
+Frontend: 3 passed, 0 failed, 0 skipped
 
-$ node --test tests/frontend.test.cjs
-✔ logout clears sensitive DOM and late profile response cannot repopulate it (2.91175ms)
-✔ failed server logout does not pretend to terminate the session (0.718958ms)
-✔ document pagination requests a bounded page and escapes titles (0.878083ms)
-ℹ tests 3
-ℹ suites 0
-ℹ pass 3
-ℹ fail 0
-ℹ cancelled 0
-ℹ skipped 0
-ℹ todo 0
-ℹ duration_ms 69.858625
+Final full run includes the secret-path guard and old account ID reuse regression.
+
+$ scripts/test.sh --frontend
+3 passed, 0 failed, 0 skipped (Node 25.9.0)
+
+$ scripts/scan.sh --report
+exit 0
+bandit HTML/JSON: 1507 LOC, High/Medium/Low 0, skipped files 0
+Dependency JSON: 30 dependencies, 0 known vulnerabilities, 0 skipped
+See bandit.json, bandit-report.html, dependency-audit.json.
+Dependency JSON was regenerated; its package/version/result data is unchanged.
+
+$ python3 docs/security-review/container_smoke.py
+SEED_DEMO_DATA=0: gunicorn HTTP/CSP/login/no-store OK, uid=10001, image excludes .env/.venv
+SEED_DEMO_DATA=1: gunicorn HTTP/CSP/login/no-store OK, uid=10001, image excludes .env/.venv
+Temporary containers removed; existing Compose service and volumes untouched.
+The script is retained here for reproduction.
 
 $ node --check static/app.js
 exit 0
 
-$ pip-audit -r requirements.txt
-30 dependencies, 0 known vulnerabilities, 0 skipped
-See dependency-audit.json (pip-audit 2.10.1).
+Bash syntax: each scripts/*.sh checked with bash -n, all passed.
+Compose config: rendered with dummy secrets and --env-file /dev/null.
+Verified explicit SEED_DEMO_DATA=0, ENABLE_TRAINING_ROUTES=1, CONVERTER_BIN,
+JWT_SECRET, SECRET_KEY, DATA_KEY passthrough and 127.0.0.1 port binding.
+Actual secrets were not printed.
 
-Not run: Docker/Linux deployment, browser E2E, real LibreOffice, multi-worker Redis.
+Markdown: 114 local links/anchors in README.md and docs/*.md checked; 0 errors.
+Historical V/R/S diagnostic excerpts remain labeled as historical.
+
+$ git diff --check
+exit 0
+
+Not run: browser E2E, TLS proxy, real LibreOffice, multi-worker Redis,
+remote CI result verification, live-service destructive reseed/volume removal.
+Operational failure handling uses isolated command doubles; app reseed tests
+use temporary databases/files. The production Compose service and volumes
+were not changed by these checks.

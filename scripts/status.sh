@@ -6,7 +6,7 @@ require_docker
 log "컨테이너 상태"; compose ps
 echo
 if is_running; then
-  if curl -fsS -o /dev/null -m 3 "${URL}/" 2>/dev/null; then ok "헬스: 정상 (${URL})"; else warn "헬스: 컨테이너는 있으나 HTTP 무응답"; fi
+  if curl -fsS -o /dev/null -m 3 "${URL}/" 2>/dev/null; then ok "헬스: 정상 (${URL})"; else die "헬스: 컨테이너는 있으나 HTTP 무응답"; fi
 else
-  warn "컨테이너가 실행 중이 아닙니다. 'scripts/start.sh' 로 기동하세요."
+  die "컨테이너가 실행 중이 아닙니다. 'scripts/start.sh' 로 기동하세요."
 fi
